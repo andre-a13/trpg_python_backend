@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import JSON, Integer, String
+from sqlalchemy import JSON, Integer, String, Text
 from .db import Base
 
 from sqlalchemy import Integer, String, JSON, text
@@ -17,3 +17,4 @@ class Character(Base):
     skills_secondary: Mapped[list[str]] = mapped_column(JSON, default=list)
     inventory: Mapped[list[str]] = mapped_column(JSON, default=list)
     gold: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

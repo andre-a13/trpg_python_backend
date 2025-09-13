@@ -12,6 +12,8 @@ pip install fastapi uvicorn[standard] sqlalchemy aiosqlite pydantic-settings
 uvicorn app.main:app --reload
 # If uvicorn not found: python -m uvicorn app.main:app --reload
 
+# 4) Run the ngrok tunnel
+ngrok http 8000 --url https://gratifying-axel-mercantile.ngrok-free.app
 
 app/
   __init__.py

@@ -5,11 +5,11 @@ from .routers import characters
 from fastapi.middleware.cors import CORSMiddleware
 
 origins = [
+    "https://www.arnaud-a.dev",  # <- add this
+    "https://arnaud-a.dev",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://arnaud-a.dev",           # add your prod domain when ready
 ]
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
