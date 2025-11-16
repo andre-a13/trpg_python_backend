@@ -31,6 +31,7 @@ class CharacterCreate(BaseModel):
     inventory: list[SkillName] = []
     gold: Annotated[int, Ge(0)] = 0  # new field with default value
     notes : str | None = None  # new field with default value
+    current_hp : Annotated[int, Ge(0)] = 0  # new field with default value
     
 class SkillSetPartial(BaseModel):
     corps: Score | None = None
@@ -48,6 +49,7 @@ class CharacterUpdate(BaseModel):
     inventory: list[SkillName] | None = None
     gold: Annotated[int, Ge(0)] | None = None 
     notes : str | None = None
+    current_hp : Annotated[int, Ge(0)] | None = None
 
 @router.post("", status_code=201)
 async def create_character(body: CharacterCreate, session: AsyncSession = Depends(get_session)):
@@ -84,6 +86,7 @@ async def list_characters(limit: int = 50, offset: int = 0, session: AsyncSessio
             "inventory": c.inventory,
             "gold": c.gold,
             "notes": c.notes,
+            "current_hp": c.current_hp,
         }
         for c in rows
     ]
@@ -111,6 +114,7 @@ async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_s
         "inventory": c.inventory,
         "gold": c.gold,
         "notes": c.notes,
+        "current_hp": c.current_hp,
     }
 
 @router.patch("/{slug}", status_code=200)
@@ -133,6 +137,7 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
     if "inventory" in data: c.inventory = data["inventory"]
     if "gold" in data: c.gold = data["gold"]  
     if "notes" in data: c.notes = data["notes"]
+    if "current_hp" in data: c.current_hp = data["current_hp"]
     
     
     await session.commit()
@@ -149,4 +154,5 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
         "inventory": c.inventory,
         "gold": c.gold,
         "notes": c.notes,
+        "current_hp": c.current_hp,
     }

@@ -5,7 +5,7 @@ from .routers import characters
 from fastapi.middleware.cors import CORSMiddleware
 
 origins = [
-    "https://www.arnaud-a.dev",  # <- add this
+    "https://www.arnaud-a.dev",
     "https://arnaud-a.dev",
     "http://localhost:5173",
     "http://127.0.0.1:5173",

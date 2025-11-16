@@ -18,3 +18,4 @@ class Character(Base):
     inventory: Mapped[list[str]] = mapped_column(JSON, default=list)
     gold: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_hp: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
