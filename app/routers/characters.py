@@ -1,8 +1,7 @@
-from http.client import HTTPException
 from annotated_types import Ge
 from pydantic import Field
 from typing import Annotated
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, HttpUrl, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
