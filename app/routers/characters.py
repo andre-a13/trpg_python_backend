@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import  Character
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter()
 
@@ -52,6 +53,10 @@ class CharacterUpdate(BaseModel):
 
 @router.post("", status_code=201)
 async def create_character(body: CharacterCreate, session: AsyncSession = Depends(get_session)):
+    existing = await session.execute(select(Character.id).where(Character.slug == body.slug).limit(1))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Character slug already exists")
+
     char = Character(
         slug=body.slug,
         name=body.name,
@@ -60,9 +65,16 @@ async def create_character(body: CharacterCreate, session: AsyncSession = Depend
         stats=body.stats.model_dump(),
         skills_primary=body.skillsPrimary,
         skills_secondary=body.skillsSecondary,
-        inventory=body.inventory)    
+        inventory=body.inventory,
+        gold=body.gold,
+        notes=body.notes,
+        current_hp=body.current_hp)
     session.add(char)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Character slug already exists")
     await session.refresh(char)
     return {"id": char.id, "name": char.name}
 
@@ -124,7 +136,13 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
         raise HTTPException(status_code=404, detail="Character not found")
 
     data = body.model_dump(exclude_unset=True)
-    if "slug" in data: c.slug = data["slug"]
+    if "slug" in data:
+        existing = await session.execute(
+            select(Character.id).where(Character.slug == data["slug"], Character.id != c.id).limit(1)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Character slug already exists")
+        c.slug = data["slug"]
     if "name" in data: c.name = data["name"]
     if "race" in data: c.race = data["race"]
     if "portraitUrl" in data: c.portrait_url = str(data["portraitUrl"]) if data["portraitUrl"] else None
@@ -139,7 +157,11 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
     if "current_hp" in data: c.current_hp = data["current_hp"]
     
     
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Character slug already exists")
     await session.refresh(c)
     return {
         "id": c.id,

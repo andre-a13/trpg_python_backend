@@ -8,7 +8,7 @@ from sqlalchemy import Integer, String, JSON, text
 class Character(Base):
     __tablename__ = "characters"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    slug: Mapped[str] = mapped_column(String(100), index=True)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100), index=True)
     race: Mapped[str] = mapped_column(String(50))
     portrait_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)

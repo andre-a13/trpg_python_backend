@@ -3,13 +3,9 @@ from fastapi import FastAPI
 from .db import engine, Base
 from .routers import characters
 from fastapi.middleware.cors import CORSMiddleware
+from .config import get_settings
 
-origins = [
-    "https://www.arnaud-a.dev",
-    "https://arnaud-a.dev",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,7 +22,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(characters.router, prefix="/characters", tags=["characters"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

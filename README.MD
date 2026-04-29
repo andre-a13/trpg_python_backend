@@ -9,6 +9,10 @@ source .venv/Scripts/activate
 # 2) Install deps
 pip install fastapi uvicorn[standard] sqlalchemy aiosqlite pydantic-settings
 
+# 2.5) Configure local env if you do not already have a .env file
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# Edit .env if you need to override DATABASE_URL or CORS_ORIGINS
+
 # 3) Run the API
 uvicorn app.main:app --reload
 # If uvicorn not found: python -m uvicorn app.main:app --reload
