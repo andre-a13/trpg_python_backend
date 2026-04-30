@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from .db import engine, Base
-from .routers import characters
+from .routers import characters, portraits
 from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 
@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(characters.router, prefix="/characters", tags=["characters"])
+app.include_router(portraits.router, prefix="/characters", tags=["character portraits"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

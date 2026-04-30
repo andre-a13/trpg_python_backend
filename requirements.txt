@@ -1,6 +1,7 @@
 aiosqlite==0.21.0
 annotated-types==0.7.0
 anyio==4.10.0
+boto3==1.40.61
 click==8.2.1
 colorama==0.4.6
 fastapi==0.116.1

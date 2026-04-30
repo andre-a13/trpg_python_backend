@@ -32,6 +32,7 @@ class CharacterCreate(BaseModel):
     gold: Annotated[int, Ge(0)] = 0  # new field with default value
     notes : str | None = None  # new field with default value
     current_hp : Annotated[int, Ge(0)] = 0  # new field with default value
+    bonusHealth: Annotated[int, Ge(0)] = 0
     
 class SkillSetPartial(BaseModel):
     corps: Score | None = None
@@ -50,6 +51,24 @@ class CharacterUpdate(BaseModel):
     gold: Annotated[int, Ge(0)] | None = None 
     notes : str | None = None
     current_hp : Annotated[int, Ge(0)] | None = None
+    bonusHealth: Annotated[int, Ge(0)] | None = None
+
+def serialize_character(c: Character):
+    return {
+        "id": c.id,
+        "slug": c.slug,
+        "name": c.name,
+        "race": c.race,
+        "portraitUrl": c.portrait_url,
+        "stats": c.stats,
+        "skillsPrimary": c.skills_primary,
+        "skillsSecondary": c.skills_secondary,
+        "inventory": c.inventory,
+        "gold": c.gold,
+        "notes": c.notes,
+        "current_hp": c.current_hp,
+        "bonusHealth": c.bonus_health,
+    }
 
 @router.post("", status_code=201)
 async def create_character(body: CharacterCreate, session: AsyncSession = Depends(get_session)):
@@ -68,7 +87,8 @@ async def create_character(body: CharacterCreate, session: AsyncSession = Depend
         inventory=body.inventory,
         gold=body.gold,
         notes=body.notes,
-        current_hp=body.current_hp)
+        current_hp=body.current_hp,
+        bonus_health=body.bonusHealth)
     session.add(char)
     try:
         await session.commit()
@@ -84,23 +104,7 @@ async def list_characters(limit: int = 50, offset: int = 0, session: AsyncSessio
         select(Character).order_by(Character.id).limit(limit).offset(offset)
     )
     rows = result.scalars().all()
-    return [
-        {
-            "id": c.id,
-            "slug": c.slug,
-            "name": c.name,
-            "race": c.race,
-            "portraitUrl": c.portrait_url,
-            "stats": c.stats,
-            "skillsPrimary": c.skills_primary,
-            "skillsSecondary": c.skills_secondary,
-            "inventory": c.inventory,
-            "gold": c.gold,
-            "notes": c.notes,
-            "current_hp": c.current_hp,
-        }
-        for c in rows
-    ]
+    return [serialize_character(c) for c in rows]
     
 @router.get("/{slug}", status_code=200)
 async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_session)):
@@ -113,20 +117,7 @@ async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_s
     if not c:
         raise HTTPException(status_code=404, detail="Character not found")
 
-    return {
-        "id": c.id,
-        "slug": c.slug,
-        "name": c.name,
-        "race": c.race,
-        "portraitUrl": c.portrait_url,
-        "stats": c.stats,
-        "skillsPrimary": c.skills_primary,
-        "skillsSecondary": c.skills_secondary,
-        "inventory": c.inventory,
-        "gold": c.gold,
-        "notes": c.notes,
-        "current_hp": c.current_hp,
-    }
+    return serialize_character(c)
 
 @router.patch("/{slug}", status_code=200)
 async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSession = Depends(get_session)):
@@ -155,6 +146,7 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
     if "gold" in data: c.gold = data["gold"]  
     if "notes" in data: c.notes = data["notes"]
     if "current_hp" in data: c.current_hp = data["current_hp"]
+    if "bonusHealth" in data: c.bonus_health = data["bonusHealth"]
     
     
     try:
@@ -163,17 +155,4 @@ async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSessio
         await session.rollback()
         raise HTTPException(status_code=409, detail="Character slug already exists")
     await session.refresh(c)
-    return {
-        "id": c.id,
-        "slug": c.slug,
-        "name": c.name,
-        "race": c.race,
-        "portraitUrl": c.portrait_url,
-        "stats": c.stats,
-        "skillsPrimary": c.skills_primary,
-        "skillsSecondary": c.skills_secondary,
-        "inventory": c.inventory,
-        "gold": c.gold,
-        "notes": c.notes,
-        "current_hp": c.current_hp,
-    }
+    return serialize_character(c)
