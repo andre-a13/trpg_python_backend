@@ -21,10 +21,11 @@ app/
   __init__.py
   main.py              # FastAPI app + lifespan + CORS
   db.py                # async SQLAlchemy engine, Session, Base
-  models.py            # Character model (slug, name, race, stats, skills*, inventory, gold)
+  models.py            # Character and Team models, including the character/team N-N relation
   routers/
     __init__.py
     characters.py      # POST /characters, GET /characters, GET /characters/{slug}, PATCH /characters/{slug}
+    teams.py           # POST/GET/PATCH /teams and POST/DELETE /teams/{uuid}/characters/{slug}
 data.db                 # created on first run
 
 

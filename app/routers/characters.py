@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import  Character
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 
@@ -68,6 +69,14 @@ def serialize_character(c: Character):
         "notes": c.notes,
         "current_hp": c.current_hp,
         "bonusHealth": c.bonus_health,
+        "teams": [
+            {
+                "uuid": team.uuid,
+                "name": team.name,
+                "illustrationUrl": team.illustration_url,
+            }
+            for team in c.teams
+        ],
     }
 
 @router.post("", status_code=201)
@@ -101,7 +110,11 @@ async def create_character(body: CharacterCreate, session: AsyncSession = Depend
 @router.get("", status_code=200)
 async def list_characters(limit: int = 50, offset: int = 0, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(Character).order_by(Character.id).limit(limit).offset(offset)
+        select(Character)
+        .options(selectinload(Character.teams))
+        .order_by(Character.id)
+        .limit(limit)
+        .offset(offset)
     )
     rows = result.scalars().all()
     return [serialize_character(c) for c in rows]
@@ -111,7 +124,7 @@ async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_s
     
     
     result = await session.execute(
-        select(Character).where(Character.slug == slug).limit(1)
+        select(Character).options(selectinload(Character.teams)).where(Character.slug == slug).limit(1)
     )
     c = result.scalar_one_or_none()
     if not c:
@@ -121,7 +134,9 @@ async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_s
 
 @router.patch("/{slug}", status_code=200)
 async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSession = Depends(get_session)):
-    res = await session.execute(select(Character).where(Character.slug == slug).limit(1))
+    res = await session.execute(
+        select(Character).options(selectinload(Character.teams)).where(Character.slug == slug).limit(1)
+    )
     c = res.scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Character not found")
