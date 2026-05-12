@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite+aiosqlite:///./data.db"
+    database_url: str = "sqlite+aiosqlite:///./data/data.db"
     cors_origins: str = (
         "https://www.arnaud-a.dev,"
         "https://arnaud-a.dev,"

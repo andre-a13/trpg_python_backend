@@ -31,3 +31,20 @@ data.db                 # created on first run
 
 source .venv/Scripts/activate
 uvicorn app.main:app --reload
+
+## Docker SQLite persistence
+
+In Docker, `DATABASE_URL` is set to `sqlite+aiosqlite:////app/data/data.db`.
+`docker-compose.yml` bind-mounts `./data` to `/app/data`,
+so the SQLite database survives container rebuilds and restarts.
+
+To initialize the mounted database from your current local database:
+
+```powershell
+New-Item -ItemType Directory -Force data
+Copy-Item -Force data.db data\data.db
+```
+
+For Git snapshots, stop writes first or use SQLite's backup command, then commit
+the copied `.db` file. Do not rely on committing a live database while the API is
+writing to it.
