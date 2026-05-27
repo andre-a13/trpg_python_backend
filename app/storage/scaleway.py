@@ -1,4 +1,4 @@
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -57,6 +57,20 @@ class ScalewayObjectStorage:
             bucket = self._bucket_name()
             base_url = f"https://{bucket}.s3.{self.settings.scw_object_storage_region}.scw.cloud"
         return f"{base_url}/{quote(object_key)}"
+
+    def upload_file(
+        self,
+        file_path: Path,
+        object_key: str,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        client = self._client()
+        client.upload_file(
+            str(file_path),
+            self._bucket_name(),
+            object_key,
+            ExtraArgs={"ContentType": content_type},
+        )
 
     def _bucket_name(self) -> str:
         if not self.settings.scw_object_storage_bucket:

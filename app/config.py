@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     scw_object_storage_region: str = "fr-par"
     scw_object_storage_endpoint: str | None = None
     scw_public_bucket_url: str | None = None
+    db_snapshot_on_shutdown: bool = True
+    db_snapshot_prefix: str = "save"
     character_image_max_size_mb: int = Field(default=5, gt=0)
     character_image_upload_url_expires_seconds: int = Field(default=900, gt=0)
 

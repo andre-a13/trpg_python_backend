@@ -1,3 +1,0 @@
-api.arnaud-a.dev {
-    reverse_proxy api:8000
-}

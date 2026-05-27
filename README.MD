@@ -48,3 +48,35 @@ Copy-Item -Force data.db data\data.db
 For Git snapshots, stop writes first or use SQLite's backup command, then commit
 the copied `.db` file. Do not rely on committing a live database while the API is
 writing to it.
+
+## Automatic shutdown database snapshots
+
+When the API shuts down cleanly, it creates a SQLite backup and uploads it to
+Scaleway Object Storage. With the default `.env.example` values, snapshots are
+stored in bucket `trpg-files` under keys like:
+
+```text
+save/data-20260520T183000Z.db
+```
+
+Required settings:
+
+```env
+SCW_ACCESS_KEY=...
+SCW_SECRET_KEY=...
+SCW_OBJECT_STORAGE_BUCKET=trpg-files
+SCW_OBJECT_STORAGE_REGION=fr-par
+SCW_OBJECT_STORAGE_ENDPOINT=https://s3.fr-par.scw.cloud
+DB_SNAPSHOT_ON_SHUTDOWN=true
+DB_SNAPSHOT_PREFIX=save
+```
+
+Docker Compose gives the API a `60s` stop grace period so the upload can finish
+when you run `docker compose down` or `docker compose stop api`.
+
+## VPS gateway
+
+The public Caddy container lives in `../vps-gateway-project`.
+
+This stack only runs the TRPG API and joins the shared Docker network named
+`web`, so the gateway can route `api.arnaud-a.dev` to `trpg-api:8000`.
