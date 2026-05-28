@@ -13,6 +13,10 @@ pip install fastapi uvicorn[standard] sqlalchemy aiosqlite pydantic-settings
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 # Edit .env if you need to override DATABASE_URL or CORS_ORIGINS
 
+For production, `CORS_ORIGINS` must include every browser origin that calls the
+API. Subdomains are separate origins, so `https://game.arnaud-a.dev` must be
+listed explicitly when the frontend is deployed there.
+
 # 3) Run the API
 uvicorn app.main:app --reload
 # If uvicorn not found: python -m uvicorn app.main:app --reload

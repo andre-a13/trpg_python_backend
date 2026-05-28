@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     cors_origins: str = (
         "https://www.arnaud-a.dev,"
         "https://arnaud-a.dev,"
+        "https://game.arnaud-a.dev,"
         "http://localhost:5173,"
         "http://127.0.0.1:5173"
     )
