@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_current_user
 from app.db import get_session
-from app.models import Character
+from app.models import Character, User
 from app.schemas.uploads import CharacterPortraitUploadRequest, CharacterPortraitUploadResponse
 from app.storage.scaleway import (
     ScalewayObjectStorage,
@@ -19,6 +20,7 @@ router = APIRouter()
 async def create_character_portrait_upload(
     slug: str,
     body: CharacterPortraitUploadRequest,
+    _current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
     storage: ScalewayObjectStorage = Depends(get_object_storage),
 ):

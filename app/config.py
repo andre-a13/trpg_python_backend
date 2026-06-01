@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     db_snapshot_prefix: str = "save"
     character_image_max_size_mb: int = Field(default=5, gt=0)
     character_image_upload_url_expires_seconds: int = Field(default=900, gt=0)
+    auth_token_secret: str | None = None
+    access_token_expires_seconds: int = Field(default=3600, gt=0)
+    refresh_token_expires_seconds: int = Field(default=2592000, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

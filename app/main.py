@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from .db import engine, Base
 from .db_snapshot import create_and_upload_database_snapshot
-from .routers import characters, portraits, teams
+from .routers import auth, characters, portraits, teams
 from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 
@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(characters.router, prefix="/characters", tags=["characters"])
 app.include_router(portraits.router, prefix="/characters", tags=["character portraits"])
 app.include_router(teams.router, prefix="/teams", tags=["teams"])

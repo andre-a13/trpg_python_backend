@@ -1,0 +1,17 @@
+{
+  "CORSRules": [
+    {
+      "AllowedHeaders": ["*"],
+      "AllowedMethods": ["GET", "HEAD", "POST", "PUT", "DELETE"],
+      "AllowedOrigins": [
+        "https://www.arnaud-a.dev",
+        "https://arnaud-a.dev",
+        "https://game.arnaud-a.dev",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+      ],
+      "ExposeHeaders": ["ETag"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}

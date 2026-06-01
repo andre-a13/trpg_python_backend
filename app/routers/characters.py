@@ -6,7 +6,8 @@ from pydantic import BaseModel, HttpUrl, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
-from app.models import  Character
+from app.auth import require_current_user
+from app.models import Character, User
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
@@ -80,7 +81,11 @@ def serialize_character(c: Character):
     }
 
 @router.post("", status_code=201)
-async def create_character(body: CharacterCreate, session: AsyncSession = Depends(get_session)):
+async def create_character(
+    body: CharacterCreate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     existing = await session.execute(select(Character.id).where(Character.slug == body.slug).limit(1))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Character slug already exists")
@@ -133,7 +138,12 @@ async def get_character_by_slug(slug: str, session: AsyncSession = Depends(get_s
     return serialize_character(c)
 
 @router.patch("/{slug}", status_code=200)
-async def patch_character(slug: str, body: CharacterUpdate, session: AsyncSession = Depends(get_session)):
+async def patch_character(
+    slug: str,
+    body: CharacterUpdate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     res = await session.execute(
         select(Character).options(selectinload(Character.teams)).where(Character.slug == slug).limit(1)
     )

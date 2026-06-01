@@ -8,8 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import require_current_user
 from app.db import get_session
-from app.models import Character, Team
+from app.models import Character, Team, User
 
 router = APIRouter()
 
@@ -68,7 +69,11 @@ async def get_character_or_404(slug: str, session: AsyncSession) -> Character:
 
 
 @router.post("", status_code=201)
-async def create_team(body: TeamCreate, session: AsyncSession = Depends(get_session)):
+async def create_team(
+    body: TeamCreate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     team_data = {
         "name": body.name,
         "illustration_url": str(body.illustrationUrl) if body.illustrationUrl else None,
@@ -106,7 +111,12 @@ async def get_team(team_uuid: UUID, session: AsyncSession = Depends(get_session)
 
 
 @router.patch("/{team_uuid}", status_code=200)
-async def patch_team(team_uuid: UUID, body: TeamUpdate, session: AsyncSession = Depends(get_session)):
+async def patch_team(
+    team_uuid: UUID,
+    body: TeamUpdate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     team = await get_team_or_404(team_uuid, session)
     data = body.model_dump(exclude_unset=True)
 
@@ -123,6 +133,7 @@ async def patch_team(team_uuid: UUID, body: TeamUpdate, session: AsyncSession = 
 async def add_character_to_team(
     team_uuid: UUID,
     character_slug: str,
+    _current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)
@@ -137,6 +148,7 @@ async def add_character_to_team(
 async def remove_character_from_team(
     team_uuid: UUID,
     character_slug: str,
+    _current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)

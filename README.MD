@@ -17,6 +17,61 @@ For production, `CORS_ORIGINS` must include every browser origin that calls the
 API. Subdomains are separate origins, so `https://game.arnaud-a.dev` must be
 listed explicitly when the frontend is deployed there.
 
+## Account authentication
+
+Write routes are protected with short-lived account access tokens. Set a
+server-side token secret in `.env`:
+
+```env
+AUTH_TOKEN_SECRET=replace-with-a-long-random-secret
+ACCESS_TOKEN_EXPIRES_SECONDS=3600
+REFRESH_TOKEN_EXPIRES_SECONDS=2592000
+```
+
+Create the first account. This endpoint is public only while no users exist:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/auth/register `
+  -ContentType "application/json" `
+  -Body '{"username":"admin","password":"replace-with-a-long-password"}'
+```
+
+Login to get an access token and refresh token:
+
+```powershell
+$response = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/auth/login `
+  -ContentType "application/json" `
+  -Body '{"username":"admin","password":"replace-with-a-long-password"}'
+
+$token = $response.access_token
+$refreshToken = $response.refresh_token
+```
+
+Call a protected route:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/characters `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body '{"slug":"hero","name":"Hero","race":"Human","stats":{"corps":50,"mental":50,"social":50}}'
+```
+
+Refresh tokens rotate on use:
+
+```powershell
+$response = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/auth/refresh `
+  -ContentType "application/json" `
+  -Body (@{ refresh_token = $refreshToken } | ConvertTo-Json)
+```
+
+Never expose `AUTH_TOKEN_SECRET` in a public frontend bundle. If the secret is
+missing from the environment, protected routes fail closed and do not allow
+writes.
+
 # 3) Run the API
 uvicorn app.main:app --reload
 # If uvicorn not found: python -m uvicorn app.main:app --reload
