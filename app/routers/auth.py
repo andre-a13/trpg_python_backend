@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, StringConstraints, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,16 +25,21 @@ router = APIRouter()
 optional_security = HTTPBearer(auto_error=False)
 
 Username = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
-Password = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+Password = Annotated[str, StringConstraints(min_length=12, max_length=1024)]
+
+AUTH_RATE_LIMIT_WINDOW_SECONDS = 300
+AUTH_RATE_LIMIT_MAX_ATTEMPTS = 5
+_auth_attempts: dict[str, list[float]] = {}
 
 
 class AccountCredentials(BaseModel):
     username: Username
     password: Password
 
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.casefold()
 
 
 class UserResponse(BaseModel):
@@ -46,7 +51,6 @@ class UserResponse(BaseModel):
 
 class TokenPairResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
     refresh_expires_in: int
@@ -65,15 +69,16 @@ async def issue_token_pair(
     user: User,
     settings: Settings,
     session: AsyncSession,
+    response: Response,
 ) -> TokenPairResponse:
     access_token, expires_in = create_access_token(user, settings)
     refresh_token, refresh_record = create_refresh_token(settings)
     refresh_record.user_id = user.id
     session.add(refresh_record)
     await session.commit()
+    set_refresh_token_cookie(response, refresh_token, settings)
     return TokenPairResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         expires_in=expires_in,
         refresh_expires_in=settings.refresh_token_expires_seconds,
     )
@@ -84,18 +89,81 @@ async def count_users(session: AsyncSession) -> int:
     return result.scalar_one()
 
 
+def set_refresh_token_cookie(response: Response, token: str, settings: Settings) -> None:
+    response.set_cookie(
+        key=settings.refresh_token_cookie_name,
+        value=token,
+        max_age=settings.refresh_token_expires_seconds,
+        httponly=True,
+        secure=settings.refresh_token_cookie_secure,
+        samesite=settings.refresh_token_cookie_samesite,
+        path="/auth",
+    )
+
+
+def clear_refresh_token_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        key=settings.refresh_token_cookie_name,
+        httponly=True,
+        secure=settings.refresh_token_cookie_secure,
+        samesite=settings.refresh_token_cookie_samesite,
+        path="/auth",
+    )
+
+
+def get_refresh_token_from_cookie(request: Request, settings: Settings) -> str:
+    token = request.cookies.get(settings.refresh_token_cookie_name)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    return token
+
+
+def _auth_rate_limit_key(request: Request, username: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    return f"{host}:{username}"
+
+
+def check_auth_rate_limit(request: Request, username: str) -> str:
+    now = datetime.utcnow().timestamp()
+    key = _auth_rate_limit_key(request, username)
+    attempts = [
+        attempt
+        for attempt in _auth_attempts.get(key, [])
+        if now - attempt < AUTH_RATE_LIMIT_WINDOW_SECONDS
+    ]
+    _auth_attempts[key] = attempts
+    if len(attempts) >= AUTH_RATE_LIMIT_MAX_ATTEMPTS:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many authentication attempts")
+    return key
+
+
+def record_auth_failure(key: str) -> None:
+    _auth_attempts.setdefault(key, []).append(datetime.utcnow().timestamp())
+
+
+def clear_auth_failures(key: str) -> None:
+    _auth_attempts.pop(key, None)
+
+
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register(
     body: AccountCredentials,
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
-    if await count_users(session) > 0:
+    rate_limit_key = check_auth_rate_limit(request, body.username)
+    users_count = await count_users(session)
+    if users_count > 0:
         await require_current_user(credentials, settings, session)
+    elif not settings.allow_first_user_registration:
+        record_auth_failure(rate_limit_key)
+        raise HTTPException(status_code=403, detail="Initial account registration is disabled")
 
-    existing = await session.execute(select(User.id).where(User.username == body.username).limit(1))
+    existing = await session.execute(select(User.id).where(func.lower(User.username) == body.username).limit(1))
     if existing.scalar_one_or_none() is not None:
+        record_auth_failure(rate_limit_key)
         raise HTTPException(status_code=409, detail="Username already exists")
 
     user = User(
@@ -107,37 +175,45 @@ async def register(
         await session.commit()
     except IntegrityError:
         await session.rollback()
+        record_auth_failure(rate_limit_key)
         raise HTTPException(status_code=409, detail="Username already exists")
 
     await session.refresh(user)
+    clear_auth_failures(rate_limit_key)
     return serialize_user(user)
 
 
 @router.post("/login", response_model=TokenPairResponse)
 async def login(
     body: AccountCredentials,
+    request: Request,
+    response: Response,
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(select(User).where(User.username == body.username).limit(1))
+    rate_limit_key = check_auth_rate_limit(request, body.username)
+    result = await session.execute(select(User).where(func.lower(User.username) == body.username).limit(1))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
+        record_auth_failure(rate_limit_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return await issue_token_pair(user, settings, session)
+    clear_auth_failures(rate_limit_key)
+    return await issue_token_pair(user, settings, session, response)
 
 
 @router.post("/refresh", response_model=TokenPairResponse)
 async def refresh(
-    body: RefreshTokenRequest,
+    request: Request,
+    response: Response,
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
-    token_hash = hash_refresh_token(body.refresh_token)
+    token_hash = hash_refresh_token(get_refresh_token_from_cookie(request, settings))
     result = await session.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash).limit(1)
     )
@@ -162,10 +238,10 @@ async def refresh(
     refresh_record.revoked_at = datetime.utcnow()
     refresh_record.replaced_by_token_id = new_refresh_record.id
     await session.commit()
+    set_refresh_token_cookie(response, new_refresh_token, settings)
 
     return TokenPairResponse(
         access_token=access_token,
-        refresh_token=new_refresh_token,
         expires_in=expires_in,
         refresh_expires_in=settings.refresh_token_expires_seconds,
     )
@@ -173,10 +249,17 @@ async def refresh(
 
 @router.post("/logout", status_code=204)
 async def logout(
-    body: RefreshTokenRequest,
+    request: Request,
+    response: Response,
+    settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
-    token_hash = hash_refresh_token(body.refresh_token)
+    refresh_token = request.cookies.get(settings.refresh_token_cookie_name)
+    if not refresh_token:
+        clear_refresh_token_cookie(response, settings)
+        return None
+
+    token_hash = hash_refresh_token(refresh_token)
     result = await session.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash).limit(1)
     )
@@ -184,6 +267,7 @@ async def logout(
     if refresh_record is not None and refresh_record.revoked_at is None:
         refresh_record.revoked_at = datetime.utcnow()
         await session.commit()
+    clear_refresh_token_cookie(response, settings)
     return None
 
 

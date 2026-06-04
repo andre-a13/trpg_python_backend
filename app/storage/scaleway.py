@@ -25,18 +25,39 @@ class ScalewayObjectStorage:
         self.settings = settings
 
     def validate_character_portrait(self, content_type: str, size: int) -> None:
+        self._validate_character_image(
+            content_type,
+            size,
+            self.settings.character_image_max_size_bytes,
+            self.settings.character_image_max_size_mb,
+        )
+
+    def validate_character_background(self, content_type: str, size: int) -> None:
+        self._validate_character_image(
+            content_type,
+            size,
+            self.settings.character_background_image_max_size_bytes,
+            self.settings.character_background_image_max_size_mb,
+        )
+
+    def _validate_character_image(self, content_type: str, size: int, max_size_bytes: int, max_size_mb: int) -> None:
         if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
             allowed = ", ".join(sorted(ALLOWED_IMAGE_CONTENT_TYPES))
             raise UploadValidationError(f"Unsupported image type. Allowed types: {allowed}")
-        if size > self.settings.character_image_max_size_bytes:
+        if size > max_size_bytes:
             raise UploadValidationError(
-                f"Image is too large. Max size is {self.settings.character_image_max_size_mb} MB"
+                f"Image is too large. Max size is {max_size_mb} MB"
             )
 
     def create_character_portrait_key(self, character_slug: str, content_type: str) -> str:
         extension = ALLOWED_IMAGE_CONTENT_TYPES[content_type]
         filename = f"{uuid4().hex}{extension}"
         return str(PurePosixPath("characters", character_slug, "portrait", filename))
+
+    def create_character_background_key(self, character_slug: str, content_type: str) -> str:
+        extension = ALLOWED_IMAGE_CONTENT_TYPES[content_type]
+        filename = f"{uuid4().hex}{extension}"
+        return str(PurePosixPath("characters", character_slug, "backgrounds", filename))
 
     def create_presigned_put_url(self, object_key: str, content_type: str) -> str:
         client = self._client()

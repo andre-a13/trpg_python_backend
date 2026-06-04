@@ -39,6 +39,8 @@ def serialize_team(team: Team):
                 "id": character.id,
                 "slug": character.slug,
                 "name": character.name,
+                "race": character.race,
+                "portraitUrl": character.portrait_url,
             }
             for character in team.characters
         ],
@@ -92,7 +94,12 @@ async def create_team(
 
 
 @router.get("", status_code=200)
-async def list_teams(limit: int = 50, offset: int = 0, session: AsyncSession = Depends(get_session)):
+async def list_teams(
+    limit: int = 50,
+    offset: int = 0,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
         select(Team)
         .options(selectinload(Team.characters))
@@ -105,7 +112,11 @@ async def list_teams(limit: int = 50, offset: int = 0, session: AsyncSession = D
 
 
 @router.get("/{team_uuid}", status_code=200)
-async def get_team(team_uuid: UUID, session: AsyncSession = Depends(get_session)):
+async def get_team(
+    team_uuid: UUID,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     team = await get_team_or_404(team_uuid, session)
     return serialize_team(team)
 

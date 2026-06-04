@@ -2,8 +2,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from .db import engine, Base
+from .db import engine
 from .db_snapshot import create_and_upload_database_snapshot
+from .migrations import run_migrations
 from .routers import auth, characters, portraits, teams
 from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
@@ -13,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup: create tables (idempotent)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await run_migrations(engine)
     try:
         yield
     finally:
@@ -37,8 +36,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning"],
 )
 
 @app.get("/")

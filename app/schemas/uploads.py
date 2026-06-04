@@ -17,3 +17,11 @@ class CharacterPortraitUploadResponse(BaseModel):
     object_key: str
     public_url: str
     expires_in: int
+
+
+class CharacterBackgroundUploadRequest(CharacterPortraitUploadRequest):
+    pass
+
+
+class CharacterBackgroundUploadResponse(CharacterPortraitUploadResponse):
+    pass

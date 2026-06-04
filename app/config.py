@@ -22,10 +22,15 @@ class Settings(BaseSettings):
     db_snapshot_on_shutdown: bool = True
     db_snapshot_prefix: str = "save"
     character_image_max_size_mb: int = Field(default=5, gt=0)
+    character_background_image_max_size_mb: int = Field(default=15, gt=0)
     character_image_upload_url_expires_seconds: int = Field(default=900, gt=0)
     auth_token_secret: str | None = None
     access_token_expires_seconds: int = Field(default=3600, gt=0)
     refresh_token_expires_seconds: int = Field(default=2592000, gt=0)
+    refresh_token_cookie_name: str = "trpg_refresh_token"
+    refresh_token_cookie_secure: bool = True
+    refresh_token_cookie_samesite: str = "lax"
+    allow_first_user_registration: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -40,6 +45,14 @@ class Settings(BaseSettings):
             raise ValueError("cors_origins must contain at least one origin")
         return value
 
+    @field_validator("refresh_token_cookie_samesite")
+    @classmethod
+    def validate_refresh_token_cookie_samesite(cls, value):
+        normalized = value.strip().lower()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("refresh_token_cookie_samesite must be lax, strict, or none")
+        return normalized
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -53,6 +66,10 @@ class Settings(BaseSettings):
     @property
     def character_image_max_size_bytes(self) -> int:
         return self.character_image_max_size_mb * 1024 * 1024
+
+    @property
+    def character_background_image_max_size_bytes(self) -> int:
+        return self.character_background_image_max_size_mb * 1024 * 1024
 
 
 @lru_cache
