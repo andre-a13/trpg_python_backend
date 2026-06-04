@@ -47,8 +47,48 @@ docker compose config >/dev/null
 echo "==> Deploying backend"
 docker compose up -d --build
 
+echo "==> Waiting for backend container health"
+for attempt in $(seq 1 30); do
+    api_container="$(docker compose ps -q api || true)"
+    if [ -n "${api_container}" ] && [ "$(docker inspect -f '{{.State.Running}}' "${api_container}")" = "true" ]; then
+        if docker compose exec -T api python - <<'PY' >/dev/null 2>&1
+import urllib.request
+
+urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2).read()
+PY
+        then
+            echo "Backend container is healthy."
+            break
+        fi
+    fi
+
+    if [ "${attempt}" -eq 30 ]; then
+        echo "ERROR: Backend container did not become healthy."
+        docker compose ps
+        docker compose logs --tail=120 api
+        exit 1
+    fi
+
+    sleep 2
+done
+
 echo "==> Checking backend health"
-curl -fsS "${HEALTH_URL:-https://api.arnaud-a.dev/health}" >/dev/null
+health_url="${HEALTH_URL:-https://api.arnaud-a.dev/health}"
+for attempt in $(seq 1 10); do
+    if curl -fsS "${health_url}" >/dev/null; then
+        echo "Backend health endpoint is reachable: ${health_url}"
+        break
+    fi
+
+    if [ "${attempt}" -eq 10 ]; then
+        echo "ERROR: Backend health endpoint failed: ${health_url}"
+        docker compose ps
+        docker compose logs --tail=120 api
+        exit 1
+    fi
+
+    sleep 3
+done
 
 echo "==> Backend status"
 docker compose ps
