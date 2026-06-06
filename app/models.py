@@ -39,6 +39,27 @@ class Character(Base):
         cascade="all, delete-orphan",
         order_by="InventoryCategory.sort_order",
     )
+    note_tabs: Mapped[list["CharacterNote"]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by=lambda: (CharacterNote.sort_order, CharacterNote.id),
+    )
+
+
+class CharacterNote(Base):
+    __tablename__ = "character_notes"
+    __table_args__ = (
+        UniqueConstraint("character_id", "title", name="uq_character_notes_character_title"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(100))
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    character: Mapped[Character] = relationship(back_populates="note_tabs")
 
 
 class InventoryCategory(Base):

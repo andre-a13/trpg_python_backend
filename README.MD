@@ -2,7 +2,7 @@
 python -m venv .venv
 source .venv/bin/activate
 
-source .venv/bin/activate
+source .venv/Scripts/activate
 uvicorn app.main:app --reload
 
 # 2) Install deps

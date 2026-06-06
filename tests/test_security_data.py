@@ -6,6 +6,7 @@ import unittest
 from uuid import uuid4
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 _temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -20,7 +21,7 @@ os.environ["ALLOW_FIRST_USER_REGISTRATION"] = "true"
 
 from app.db import engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.migrations import run_migrations  # noqa: E402
+from app.migrations import MIGRATIONS, run_migrations  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.storage.scaleway import ScalewayObjectStorage, UploadValidationError, get_object_storage  # noqa: E402
 
@@ -194,12 +195,77 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("refresh_tokens", tables)
         self.assertIn("inventory_categories", tables)
         self.assertIn("inventory_contents", tables)
+        self.assertIn("character_notes", tables)
         with sqlite3.connect(_db_path) as conn:
             character_columns = {
                 row[1]
                 for row in conn.execute("PRAGMA table_info(characters)")
             }
+            note_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(character_notes)")
+            }
         self.assertIn("background_url", character_columns)
+        self.assertEqual(
+            {"id", "character_id", "title", "content", "sort_order", "created_at", "updated_at"},
+            note_columns,
+        )
+
+    async def test_character_note_migration_copies_legacy_notes(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            db_path = os.path.join(temp_dir, "legacy.db")
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE schema_migrations (
+                        version VARCHAR(100) NOT NULL PRIMARY KEY,
+                        applied_at DATETIME NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE characters (
+                        id INTEGER NOT NULL,
+                        notes TEXT,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+                conn.executemany(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    [(version,) for version, _ in MIGRATIONS if version != "011_character_note_tabs"],
+                )
+                conn.executemany(
+                    "INSERT INTO characters (id, notes) VALUES (?, ?)",
+                    [(1, "Legacy campaign note"), (2, None)],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            legacy_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", future=True)
+            try:
+                await run_migrations(legacy_engine)
+            finally:
+                await legacy_engine.dispose()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT character_id, title, content, sort_order FROM character_notes ORDER BY character_id"
+                ).fetchall()
+            finally:
+                conn.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (1, "Notes", "Legacy campaign note", 0),
+                (2, "Notes", "", 0),
+            ],
+        )
 
     async def test_character_background_url_patch_and_detail(self):
         async with self.client() as client:
@@ -279,6 +345,118 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
         storage.validate_character_background("image/jpeg", fifteen_mb)
         with self.assertRaises(UploadValidationError):
             storage.validate_character_portrait("image/jpeg", fifteen_mb)
+
+    async def test_character_notes_default_tab_and_legacy_patch_compatibility(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            headers = self.auth_headers(access_token)
+            slug = f"notes-{uuid4().hex}"
+
+            await client.post(
+                "/characters",
+                json={
+                    "slug": slug,
+                    "name": "Notes Hero",
+                    "race": "Human",
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                    "notes": "Opening note",
+                },
+                headers=headers,
+            )
+            detail = await client.get(f"/characters/{slug}", headers=headers)
+            list_response = await client.get("/characters", headers=headers)
+            legacy_patch = await client.patch(
+                f"/characters/{slug}",
+                json={"notes": "Updated through legacy field"},
+                headers=headers,
+            )
+            patched_detail = await client.get(f"/characters/{slug}", headers=headers)
+
+        self.assertEqual(detail.status_code, 200)
+        body = detail.json()
+        self.assertEqual(body["notes"], "Opening note")
+        self.assertEqual(len(body["noteTabs"]), 1)
+        self.assertEqual(body["noteTabs"][0]["title"], "Notes")
+        self.assertEqual(body["noteTabs"][0]["content"], "Opening note")
+        listed = next(item for item in list_response.json() if item["slug"] == slug)
+        self.assertEqual(listed["notes"], "Opening note")
+        self.assertNotIn("noteTabs", listed)
+        self.assertEqual(legacy_patch.status_code, 200)
+        self.assertEqual(legacy_patch.json()["notes"], "Updated through legacy field")
+        self.assertEqual(patched_detail.json()["noteTabs"][0]["content"], "Updated through legacy field")
+
+    async def test_character_note_tab_crud_reorder_and_scoping(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            headers = self.auth_headers(access_token)
+            first_slug = f"tabs-a-{uuid4().hex}"
+            second_slug = f"tabs-b-{uuid4().hex}"
+
+            for slug in (first_slug, second_slug):
+                response = await client.post(
+                    "/characters",
+                    json={
+                        "slug": slug,
+                        "name": slug,
+                        "race": "Human",
+                        "stats": {"corps": 50, "mental": 50, "social": 50},
+                    },
+                    headers=headers,
+                )
+                self.assertEqual(response.status_code, 201)
+
+            first_detail = await client.get(f"/characters/{first_slug}", headers=headers)
+            default_note = first_detail.json()["noteTabs"][0]
+            session_note = await client.post(
+                f"/characters/{first_slug}/notes",
+                json={"title": "Session", "content": "Session notes"},
+                headers=headers,
+            )
+            duplicate = await client.post(
+                f"/characters/{first_slug}/notes",
+                json={"title": "Session"},
+                headers=headers,
+            )
+            wrong_character = await client.patch(
+                f"/characters/{second_slug}/notes/{session_note.json()['id']}",
+                json={"content": "Should fail"},
+                headers=headers,
+            )
+            renamed = await client.patch(
+                f"/characters/{first_slug}/notes/{session_note.json()['id']}",
+                json={"title": "Clues", "content": "Clue notes"},
+                headers=headers,
+            )
+            reordered = await client.patch(
+                f"/characters/{first_slug}/notes/reorder",
+                json={
+                    "items": [
+                        {"id": session_note.json()["id"], "sortOrder": 0},
+                        {"id": default_note["id"], "sortOrder": 1},
+                    ]
+                },
+                headers=headers,
+            )
+            deleted = await client.delete(
+                f"/characters/{first_slug}/notes/{default_note['id']}",
+                headers=headers,
+            )
+            last_delete = await client.delete(
+                f"/characters/{first_slug}/notes/{session_note.json()['id']}",
+                headers=headers,
+            )
+
+        self.assertEqual(session_note.status_code, 201)
+        self.assertEqual(session_note.json()["sortOrder"], 1)
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(wrong_character.status_code, 404)
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()["title"], "Clues")
+        self.assertEqual(renamed.json()["content"], "Clue notes")
+        self.assertEqual(reordered.status_code, 200)
+        self.assertEqual([note["title"] for note in reordered.json()], ["Clues", "Notes"])
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(last_delete.status_code, 409)
 
     async def test_custom_inventory_category_crud_and_nested_character_payload(self):
         async with self.client() as client:

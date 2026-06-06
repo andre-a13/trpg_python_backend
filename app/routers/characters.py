@@ -10,13 +10,15 @@ from typing import Annotated
 
 from app.auth import require_current_user
 from app.db import get_session
-from app.models import Character, InventoryCategory, InventoryContent, User
+from app.models import Character, CharacterNote, InventoryCategory, InventoryContent, User
 
 router = APIRouter()
 
+DEFAULT_NOTE_TITLE = "Notes"
 SkillName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
 InventoryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 InventoryNotes = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)]
+NoteTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Score = Annotated[int, Field(ge=0, le=100)]
 
 
@@ -86,6 +88,17 @@ class InventoryContentUpdate(BaseModel):
     sortOrder: Annotated[int, Ge(0)] | None = None
 
 
+class CharacterNoteCreate(BaseModel):
+    title: NoteTitle
+    content: str | None = ""
+
+
+class CharacterNoteUpdate(BaseModel):
+    title: NoteTitle | None = None
+    content: str | None = None
+    sortOrder: Annotated[int, Ge(0)] | None = None
+
+
 class ReorderEntry(BaseModel):
     id: int
     sortOrder: Annotated[int, Ge(0)]
@@ -93,6 +106,27 @@ class ReorderEntry(BaseModel):
 
 class ReorderRequest(BaseModel):
     items: list[ReorderEntry]
+
+
+def sort_note_tabs(notes: list[CharacterNote]) -> list[CharacterNote]:
+    return sorted(notes, key=lambda row: (row.sort_order, row.id))
+
+
+def serialize_character_note(note: CharacterNote):
+    return {
+        "id": note.id,
+        "characterId": note.character_id,
+        "title": note.title,
+        "content": note.content,
+        "sortOrder": note.sort_order,
+    }
+
+
+def first_note_content(c: Character) -> str | None:
+    tabs = sort_note_tabs(c.note_tabs)
+    if tabs:
+        return tabs[0].content
+    return c.notes
 
 
 def serialize_inventory_content(item: InventoryContent):
@@ -119,7 +153,11 @@ def serialize_inventory_category(category: InventoryCategory):
     }
 
 
-def serialize_character(c: Character, include_inventory_categories: bool = False):
+def serialize_character(
+    c: Character,
+    include_inventory_categories: bool = False,
+    include_note_tabs: bool = False,
+):
     body = {
         "id": c.id,
         "slug": c.slug,
@@ -132,7 +170,7 @@ def serialize_character(c: Character, include_inventory_categories: bool = False
         "skillsSecondary": c.skills_secondary,
         "inventory": c.inventory,
         "gold": c.gold,
-        "notes": c.notes,
+        "notes": first_note_content(c),
         "current_hp": c.current_hp,
         "bonusHealth": c.bonus_health,
         "teams": [
@@ -151,6 +189,12 @@ def serialize_character(c: Character, include_inventory_categories: bool = False
             for category in sorted(c.inventory_categories, key=lambda item: (item.sort_order, item.id))
         ]
 
+    if include_note_tabs:
+        body["noteTabs"] = [
+            serialize_character_note(note)
+            for note in sort_note_tabs(c.note_tabs)
+        ]
+
     return body
 
 
@@ -159,7 +203,7 @@ async def get_character_or_404(
     session: AsyncSession,
     include_inventory_categories: bool = False,
 ) -> Character:
-    options = [selectinload(Character.teams)]
+    options = [selectinload(Character.teams), selectinload(Character.note_tabs)]
     if include_inventory_categories:
         options.append(selectinload(Character.inventory_categories).selectinload(InventoryCategory.contents))
 
@@ -170,6 +214,43 @@ async def get_character_or_404(
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
     return character
+
+
+async def ensure_default_note_tab(character: Character, session: AsyncSession) -> CharacterNote:
+    tabs = sort_note_tabs(character.note_tabs)
+    if tabs:
+        return tabs[0]
+
+    note = CharacterNote(
+        character_id=character.id,
+        title=DEFAULT_NOTE_TITLE,
+        content=character.notes or "",
+        sort_order=0,
+    )
+    session.add(note)
+    await session.flush()
+    character.note_tabs = [note]
+    return note
+
+
+async def get_character_note_or_404(
+    slug: str,
+    note_id: int,
+    session: AsyncSession,
+) -> tuple[Character, CharacterNote]:
+    character = await get_character_or_404(slug, session)
+    result = await session.execute(
+        select(CharacterNote)
+        .where(
+            CharacterNote.id == note_id,
+            CharacterNote.character_id == character.id,
+        )
+        .limit(1)
+    )
+    note = result.scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="Character note not found")
+    return character, note
 
 
 async def get_inventory_category_or_404(
@@ -230,6 +311,14 @@ async def next_content_sort_order(category_id: int, session: AsyncSession) -> in
     return 0 if value is None else value + 1
 
 
+async def next_note_sort_order(character_id: int, session: AsyncSession) -> int:
+    result = await session.execute(
+        select(func.max(CharacterNote.sort_order)).where(CharacterNote.character_id == character_id)
+    )
+    value = result.scalar_one_or_none()
+    return 0 if value is None else value + 1
+
+
 @router.post("", status_code=201)
 async def create_character(
     body: CharacterCreate,
@@ -251,12 +340,18 @@ async def create_character(
         skills_secondary=body.skillsSecondary,
         inventory=body.inventory,
         gold=body.gold,
-        notes=body.notes,
         current_hp=body.current_hp,
         bonus_health=body.bonusHealth,
     )
     session.add(char)
     try:
+        await session.flush()
+        session.add(CharacterNote(
+            character_id=char.id,
+            title=DEFAULT_NOTE_TITLE,
+            content=body.notes or "",
+            sort_order=0,
+        ))
         await session.commit()
     except IntegrityError:
         await session.rollback()
@@ -274,7 +369,7 @@ async def list_characters(
 ):
     result = await session.execute(
         select(Character)
-        .options(selectinload(Character.teams))
+        .options(selectinload(Character.teams), selectinload(Character.note_tabs))
         .order_by(Character.id)
         .limit(limit)
         .offset(offset)
@@ -453,6 +548,99 @@ async def delete_inventory_content(
     return None
 
 
+@router.post("/{slug}/notes", status_code=201)
+async def create_character_note(
+    slug: str,
+    body: CharacterNoteCreate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character = await get_character_or_404(slug, session)
+    note = CharacterNote(
+        character_id=character.id,
+        title=body.title,
+        content=body.content or "",
+        sort_order=await next_note_sort_order(character.id, session),
+    )
+    session.add(note)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Character note title already exists")
+    await session.refresh(note)
+    return serialize_character_note(note)
+
+
+@router.patch("/{slug}/notes/reorder", status_code=200)
+async def reorder_character_notes(
+    slug: str,
+    body: ReorderRequest,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character = await get_character_or_404(slug, session)
+    ids = [item.id for item in body.items]
+    result = await session.execute(
+        select(CharacterNote).where(
+            CharacterNote.character_id == character.id,
+            CharacterNote.id.in_(ids),
+        )
+    )
+    notes = {note.id: note for note in result.scalars().all()}
+    if len(notes) != len(set(ids)):
+        raise HTTPException(status_code=404, detail="Character note not found")
+    for item in body.items:
+        notes[item.id].sort_order = item.sortOrder
+    await session.commit()
+    refreshed = await get_character_or_404(slug, session)
+    return [serialize_character_note(note) for note in sort_note_tabs(refreshed.note_tabs)]
+
+
+@router.patch("/{slug}/notes/{note_id}", status_code=200)
+async def patch_character_note(
+    slug: str,
+    note_id: int,
+    body: CharacterNoteUpdate,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    _, note = await get_character_note_or_404(slug, note_id, session)
+    data = body.model_dump(exclude_unset=True)
+    if "title" in data:
+        note.title = data["title"]
+    if "content" in data:
+        note.content = data["content"] if data["content"] is not None else ""
+    if "sortOrder" in data:
+        note.sort_order = data["sortOrder"]
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Character note title already exists")
+    await session.refresh(note)
+    return serialize_character_note(note)
+
+
+@router.delete("/{slug}/notes/{note_id}", status_code=204)
+async def delete_character_note(
+    slug: str,
+    note_id: int,
+    _current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character, note = await get_character_note_or_404(slug, note_id, session)
+    count_result = await session.execute(
+        select(func.count(CharacterNote.id)).where(CharacterNote.character_id == character.id)
+    )
+    if count_result.scalar_one() <= 1:
+        raise HTTPException(status_code=409, detail="Cannot delete the last character note")
+
+    await session.delete(note)
+    await session.commit()
+    return None
+
+
 @router.get("/{slug}", status_code=200)
 async def get_character_by_slug(
     slug: str,
@@ -460,7 +648,7 @@ async def get_character_by_slug(
     session: AsyncSession = Depends(get_session),
 ):
     c = await get_character_or_404(slug, session, include_inventory_categories=True)
-    return serialize_character(c, include_inventory_categories=True)
+    return serialize_character(c, include_inventory_categories=True, include_note_tabs=True)
 
 
 @router.patch("/{slug}", status_code=200)
@@ -500,7 +688,8 @@ async def patch_character(
     if "gold" in data:
         c.gold = data["gold"]
     if "notes" in data:
-        c.notes = data["notes"]
+        note = await ensure_default_note_tab(c, session)
+        note.content = data["notes"] or ""
     if "current_hp" in data:
         c.current_hp = data["current_hp"]
     if "bonusHealth" in data:
