@@ -271,6 +271,22 @@ async def _character_note_tabs(conn: AsyncConnection) -> None:
     )
 
 
+async def _roles_and_character_ownership(conn: AsyncConnection) -> None:
+    await _add_column_if_missing(
+        conn,
+        "users",
+        "role",
+        "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'",
+    )
+    await _add_column_if_missing(
+        conn,
+        "characters",
+        "owner_user_id",
+        "ALTER TABLE characters ADD COLUMN owner_user_id INTEGER REFERENCES users (id) ON DELETE SET NULL",
+    )
+    await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_characters_owner_user_id ON characters (owner_user_id)")
+
+
 MIGRATIONS: list[Migration] = [
     ("001_initial_schema", _initial_schema),
     ("002_character_gold", _character_gold),
@@ -283,4 +299,5 @@ MIGRATIONS: list[Migration] = [
     ("009_custom_inventory_tables", _custom_inventory_tables),
     ("010_character_background_url", _character_background_url),
     ("011_character_note_tabs", _character_note_tabs),
+    ("012_roles_and_character_ownership", _roles_and_character_ownership),
 ]

@@ -22,6 +22,11 @@ class Character(Base):
     race: Mapped[str] = mapped_column(String(50))
     portrait_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     background_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     stats: Mapped[dict] = mapped_column(JSON, default=lambda: {"corps": 0, "mental": 0, "social": 0})
     skills_primary: Mapped[list[str]] = mapped_column(JSON, default=list)
     skills_secondary: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -44,6 +49,7 @@ class Character(Base):
         cascade="all, delete-orphan",
         order_by=lambda: (CharacterNote.sort_order, CharacterNote.id),
     )
+    owner: Mapped["User | None"] = relationship(back_populates="characters")
 
 
 class CharacterNote(Base):
@@ -117,8 +123,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="player", server_default="player")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    characters: Mapped[list[Character]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

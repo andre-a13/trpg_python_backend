@@ -1,16 +1,16 @@
 from annotated_types import Ge
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, HttpUrl, StringConstraints
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Annotated
 
-from app.auth import require_current_user
+from app.auth import is_admin, require_admin_user, require_current_user
 from app.db import get_session
-from app.models import Character, CharacterNote, InventoryCategory, InventoryContent, User
+from app.models import Character, CharacterNote, InventoryCategory, InventoryContent, User, character_teams
 
 router = APIRouter()
 
@@ -42,6 +42,7 @@ class CharacterCreate(BaseModel):
     notes: str | None = None
     current_hp: Annotated[int, Ge(0)] = 0
     bonusHealth: Annotated[int, Ge(0)] = 0
+    ownerUserId: int | None = None
 
 
 class SkillSetPartial(BaseModel):
@@ -64,6 +65,7 @@ class CharacterUpdate(BaseModel):
     notes: str | None = None
     current_hp: Annotated[int, Ge(0)] | None = None
     bonusHealth: Annotated[int, Ge(0)] | None = None
+    ownerUserId: int | None = None
 
 
 class InventoryCategoryCreate(BaseModel):
@@ -165,6 +167,8 @@ def serialize_character(
         "race": c.race,
         "portraitUrl": c.portrait_url,
         "backgroundUrl": c.background_url,
+        "ownerUserId": c.owner_user_id,
+        "ownerUsername": c.owner.username if c.owner else None,
         "stats": c.stats,
         "skillsPrimary": c.skills_primary,
         "skillsSecondary": c.skills_secondary,
@@ -203,17 +207,59 @@ async def get_character_or_404(
     session: AsyncSession,
     include_inventory_categories: bool = False,
 ) -> Character:
-    options = [selectinload(Character.teams), selectinload(Character.note_tabs)]
+    options = [selectinload(Character.teams), selectinload(Character.note_tabs), selectinload(Character.owner)]
     if include_inventory_categories:
         options.append(selectinload(Character.inventory_categories).selectinload(InventoryCategory.contents))
 
     result = await session.execute(
         select(Character).options(*options).where(Character.slug == slug).limit(1)
+        .execution_options(populate_existing=True)
     )
     character = result.scalar_one_or_none()
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
     return character
+
+
+async def ensure_owner_exists(owner_user_id: int | None, session: AsyncSession) -> None:
+    if owner_user_id is None:
+        return
+    owner = await session.get(User, owner_user_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Owner account not found")
+
+
+async def can_view_character(character: Character, current_user: User, session: AsyncSession) -> bool:
+    if is_admin(current_user):
+        return True
+    if character.owner_user_id == current_user.id:
+        return True
+
+    team_uuids = [team.uuid for team in character.teams]
+    if not team_uuids:
+        return False
+
+    result = await session.execute(
+        select(Character.id)
+        .join(character_teams, Character.id == character_teams.c.character_id)
+        .where(
+            Character.owner_user_id == current_user.id,
+            character_teams.c.team_uuid.in_(team_uuids),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def require_character_visible(character: Character, current_user: User, session: AsyncSession) -> None:
+    if not await can_view_character(character, current_user, session):
+        raise HTTPException(status_code=404, detail="Character not found")
+
+
+def require_character_write(character: Character, current_user: User) -> None:
+    if is_admin(current_user) or character.owner_user_id == current_user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Character write access required")
 
 
 async def ensure_default_note_tab(character: Character, session: AsyncSession) -> CharacterNote:
@@ -322,12 +368,13 @@ async def next_note_sort_order(character_id: int, session: AsyncSession) -> int:
 @router.post("", status_code=201)
 async def create_character(
     body: CharacterCreate,
-    _current_user: User = Depends(require_current_user),
+    _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
 ):
     existing = await session.execute(select(Character.id).where(Character.slug == body.slug).limit(1))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Character slug already exists")
+    await ensure_owner_exists(body.ownerUserId, session)
 
     char = Character(
         slug=body.slug,
@@ -335,6 +382,7 @@ async def create_character(
         race=body.race,
         portrait_url=str(body.portraitUrl) if body.portraitUrl else None,
         background_url=str(body.backgroundUrl) if body.backgroundUrl else None,
+        owner_user_id=body.ownerUserId,
         stats=body.stats.model_dump(),
         skills_primary=body.skillsPrimary,
         skills_secondary=body.skillsSecondary,
@@ -357,22 +405,41 @@ async def create_character(
         await session.rollback()
         raise HTTPException(status_code=409, detail="Character slug already exists")
     await session.refresh(char)
-    return {"id": char.id, "name": char.name}
+    return {"id": char.id, "name": char.name, "slug": char.slug, "ownerUserId": char.owner_user_id}
 
 
 @router.get("", status_code=200)
 async def list_characters(
     limit: int = 50,
     offset: int = 0,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
+    query = (
         select(Character)
-        .options(selectinload(Character.teams), selectinload(Character.note_tabs))
+        .options(selectinload(Character.teams), selectinload(Character.note_tabs), selectinload(Character.owner))
         .order_by(Character.id)
         .limit(limit)
         .offset(offset)
+    )
+    if not is_admin(current_user):
+        owned_team_uuids = (
+            select(character_teams.c.team_uuid)
+            .join(Character, Character.id == character_teams.c.character_id)
+            .where(Character.owner_user_id == current_user.id)
+        )
+        visible_character_ids = select(character_teams.c.character_id).where(
+            character_teams.c.team_uuid.in_(owned_team_uuids)
+        )
+        query = query.where(
+            or_(
+                Character.owner_user_id == current_user.id,
+                Character.id.in_(visible_character_ids),
+            )
+        )
+
+    result = await session.execute(
+        query
     )
     rows = result.scalars().all()
     return [serialize_character(c) for c in rows]
@@ -382,10 +449,11 @@ async def list_characters(
 async def create_inventory_category(
     slug: str,
     body: InventoryCategoryCreate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     character = await get_character_or_404(slug, session)
+    require_character_write(character, current_user)
     category = InventoryCategory(
         character_id=character.id,
         name=body.name,
@@ -405,10 +473,11 @@ async def create_inventory_category(
 async def reorder_inventory_categories(
     slug: str,
     body: ReorderRequest,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     character = await get_character_or_404(slug, session)
+    require_character_write(character, current_user)
     ids = [item.id for item in body.items]
     result = await session.execute(
         select(InventoryCategory).where(
@@ -431,10 +500,11 @@ async def patch_inventory_category(
     slug: str,
     category_id: int,
     body: InventoryCategoryUpdate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, category = await get_inventory_category_or_404(slug, category_id, session)
+    character, category = await get_inventory_category_or_404(slug, category_id, session)
+    require_character_write(character, current_user)
     data = body.model_dump(exclude_unset=True)
     if "name" in data:
         category.name = data["name"]
@@ -453,10 +523,11 @@ async def patch_inventory_category(
 async def delete_inventory_category(
     slug: str,
     category_id: int,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, category = await get_inventory_category_or_404(slug, category_id, session)
+    character, category = await get_inventory_category_or_404(slug, category_id, session)
+    require_character_write(character, current_user)
     await session.delete(category)
     await session.commit()
     return None
@@ -467,10 +538,11 @@ async def create_inventory_content(
     slug: str,
     category_id: int,
     body: InventoryContentCreate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, category = await get_inventory_category_or_404(slug, category_id, session)
+    character, category = await get_inventory_category_or_404(slug, category_id, session)
+    require_character_write(character, current_user)
     item = InventoryContent(
         category_id=category.id,
         name=body.name,
@@ -489,10 +561,11 @@ async def reorder_inventory_content(
     slug: str,
     category_id: int,
     body: ReorderRequest,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, category = await get_inventory_category_or_404(slug, category_id, session)
+    character, category = await get_inventory_category_or_404(slug, category_id, session)
+    require_character_write(character, current_user)
     ids = [item.id for item in body.items]
     result = await session.execute(
         select(InventoryContent).where(
@@ -516,10 +589,11 @@ async def patch_inventory_content(
     category_id: int,
     item_id: int,
     body: InventoryContentUpdate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, _, item = await get_inventory_content_or_404(slug, category_id, item_id, session)
+    character, _, item = await get_inventory_content_or_404(slug, category_id, item_id, session)
+    require_character_write(character, current_user)
     data = body.model_dump(exclude_unset=True)
     if "name" in data:
         item.name = data["name"]
@@ -539,10 +613,11 @@ async def delete_inventory_content(
     slug: str,
     category_id: int,
     item_id: int,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, _, item = await get_inventory_content_or_404(slug, category_id, item_id, session)
+    character, _, item = await get_inventory_content_or_404(slug, category_id, item_id, session)
+    require_character_write(character, current_user)
     await session.delete(item)
     await session.commit()
     return None
@@ -552,10 +627,11 @@ async def delete_inventory_content(
 async def create_character_note(
     slug: str,
     body: CharacterNoteCreate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     character = await get_character_or_404(slug, session)
+    require_character_write(character, current_user)
     note = CharacterNote(
         character_id=character.id,
         title=body.title,
@@ -576,10 +652,11 @@ async def create_character_note(
 async def reorder_character_notes(
     slug: str,
     body: ReorderRequest,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     character = await get_character_or_404(slug, session)
+    require_character_write(character, current_user)
     ids = [item.id for item in body.items]
     result = await session.execute(
         select(CharacterNote).where(
@@ -602,10 +679,11 @@ async def patch_character_note(
     slug: str,
     note_id: int,
     body: CharacterNoteUpdate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    _, note = await get_character_note_or_404(slug, note_id, session)
+    character, note = await get_character_note_or_404(slug, note_id, session)
+    require_character_write(character, current_user)
     data = body.model_dump(exclude_unset=True)
     if "title" in data:
         note.title = data["title"]
@@ -626,10 +704,11 @@ async def patch_character_note(
 async def delete_character_note(
     slug: str,
     note_id: int,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     character, note = await get_character_note_or_404(slug, note_id, session)
+    require_character_write(character, current_user)
     count_result = await session.execute(
         select(func.count(CharacterNote.id)).where(CharacterNote.character_id == character.id)
     )
@@ -644,10 +723,11 @@ async def delete_character_note(
 @router.get("/{slug}", status_code=200)
 async def get_character_by_slug(
     slug: str,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     c = await get_character_or_404(slug, session, include_inventory_categories=True)
+    await require_character_visible(c, current_user, session)
     return serialize_character(c, include_inventory_categories=True, include_note_tabs=True)
 
 
@@ -655,10 +735,11 @@ async def get_character_by_slug(
 async def patch_character(
     slug: str,
     body: CharacterUpdate,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     c = await get_character_or_404(slug, session)
+    require_character_write(c, current_user)
     data = body.model_dump(exclude_unset=True)
 
     if "slug" in data:
@@ -694,11 +775,16 @@ async def patch_character(
         c.current_hp = data["current_hp"]
     if "bonusHealth" in data:
         c.bonus_health = data["bonusHealth"]
+    if "ownerUserId" in data:
+        if not is_admin(current_user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+        await ensure_owner_exists(data["ownerUserId"], session)
+        c.owner_user_id = data["ownerUserId"]
 
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=409, detail="Character slug already exists")
-    await session.refresh(c)
-    return serialize_character(c)
+    updated = await get_character_or_404(c.slug, session)
+    return serialize_character(updated)

@@ -8,9 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import require_current_user
+from app.auth import is_admin, require_admin_user, require_current_user
 from app.db import get_session
-from app.models import Character, Team, User
+from app.models import Character, Team, User, character_teams
 
 router = APIRouter()
 
@@ -41,6 +41,7 @@ def serialize_team(team: Team):
                 "name": character.name,
                 "race": character.race,
                 "portraitUrl": character.portrait_url,
+                "ownerUserId": character.owner_user_id,
             }
             for character in team.characters
         ],
@@ -70,10 +71,35 @@ async def get_character_or_404(slug: str, session: AsyncSession) -> Character:
     return character
 
 
+def owned_team_uuids_query(user_id: int):
+    return (
+        select(character_teams.c.team_uuid)
+        .join(Character, Character.id == character_teams.c.character_id)
+        .where(Character.owner_user_id == user_id)
+    )
+
+
+async def require_team_visible(team: Team, current_user: User, session: AsyncSession) -> None:
+    if is_admin(current_user):
+        return
+
+    result = await session.execute(
+        select(character_teams.c.team_uuid)
+        .join(Character, Character.id == character_teams.c.character_id)
+        .where(
+            character_teams.c.team_uuid == team.uuid,
+            Character.owner_user_id == current_user.id,
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+
 @router.post("", status_code=201)
 async def create_team(
     body: TeamCreate,
-    _current_user: User = Depends(require_current_user),
+    _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
 ):
     team_data = {
@@ -97,15 +123,21 @@ async def create_team(
 async def list_teams(
     limit: int = 50,
     offset: int = 0,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
+    query = (
         select(Team)
         .options(selectinload(Team.characters))
         .order_by(Team.name, Team.uuid)
         .limit(limit)
         .offset(offset)
+    )
+    if not is_admin(current_user):
+        query = query.where(Team.uuid.in_(owned_team_uuids_query(current_user.id)))
+
+    result = await session.execute(
+        query
     )
     rows = result.scalars().all()
     return [serialize_team(team) for team in rows]
@@ -114,10 +146,11 @@ async def list_teams(
 @router.get("/{team_uuid}", status_code=200)
 async def get_team(
     team_uuid: UUID,
-    _current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)
+    await require_team_visible(team, current_user, session)
     return serialize_team(team)
 
 
@@ -125,7 +158,7 @@ async def get_team(
 async def patch_team(
     team_uuid: UUID,
     body: TeamUpdate,
-    _current_user: User = Depends(require_current_user),
+    _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)
@@ -144,7 +177,7 @@ async def patch_team(
 async def add_character_to_team(
     team_uuid: UUID,
     character_slug: str,
-    _current_user: User = Depends(require_current_user),
+    _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)
@@ -159,7 +192,7 @@ async def add_character_to_team(
 async def remove_character_from_team(
     team_uuid: UUID,
     character_slug: str,
-    _current_user: User = Depends(require_current_user),
+    _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
 ):
     team = await get_team_or_404(team_uuid, session)

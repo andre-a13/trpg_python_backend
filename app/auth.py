@@ -17,6 +17,9 @@ from app.models import RefreshToken, User
 
 
 ACCESS_TOKEN_TYPE = "access"
+USER_ROLE_ADMIN = "admin"
+USER_ROLE_PLAYER = "player"
+USER_ROLES = {USER_ROLE_ADMIN, USER_ROLE_PLAYER}
 PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_HASH_ITERATIONS = 390000
 _TOKEN_SEPARATOR = "."
@@ -98,6 +101,7 @@ def create_access_token(user: User, settings: Settings) -> tuple[str, int]:
         "typ": ACCESS_TOKEN_TYPE,
         "sub": str(user.id),
         "username": user.username,
+        "role": user.role,
         "iat": now,
         "exp": now + expires_in,
     }
@@ -189,3 +193,16 @@ async def require_current_user(
             detail="Invalid bearer token",
         )
     return user
+
+
+def is_admin(user: User) -> bool:
+    return user.role == USER_ROLE_ADMIN
+
+
+async def require_admin_user(current_user: User = Depends(require_current_user)) -> User:
+    if not is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return current_user

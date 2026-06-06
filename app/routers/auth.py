@@ -2,13 +2,13 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, StringConstraints, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
+    USER_ROLE_ADMIN,
     create_access_token,
     create_password_hash,
     create_refresh_token,
@@ -22,7 +22,6 @@ from app.models import RefreshToken, User
 
 
 router = APIRouter()
-optional_security = HTTPBearer(auto_error=False)
 
 Username = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
 Password = Annotated[str, StringConstraints(min_length=12, max_length=1024)]
@@ -45,6 +44,7 @@ class AccountCredentials(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+    role: str
     created_at: datetime
     updated_at: datetime
 
@@ -60,6 +60,7 @@ def serialize_user(user: User) -> UserResponse:
     return UserResponse(
         id=user.id,
         username=user.username,
+        role=user.role,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -149,14 +150,14 @@ def clear_auth_failures(key: str) -> None:
 async def register(
     body: AccountCredentials,
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
 ):
     rate_limit_key = check_auth_rate_limit(request, body.username)
     users_count = await count_users(session)
     if users_count > 0:
-        await require_current_user(credentials, settings, session)
+        record_auth_failure(rate_limit_key)
+        raise HTTPException(status_code=403, detail="Initial account already exists")
     elif not settings.allow_first_user_registration:
         record_auth_failure(rate_limit_key)
         raise HTTPException(status_code=403, detail="Initial account registration is disabled")
@@ -169,6 +170,7 @@ async def register(
     user = User(
         username=body.username,
         password_hash=create_password_hash(body.password),
+        role=USER_ROLE_ADMIN,
     )
     session.add(user)
     try:

@@ -92,6 +92,26 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
     def auth_headers(self, access_token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {access_token}"}
 
+    async def create_account(
+        self,
+        client: AsyncClient,
+        admin_headers: dict[str, str],
+        role: str = "player",
+    ) -> tuple[dict, dict[str, str]]:
+        credentials = {
+            "username": f"{role}-{uuid4().hex}",
+            "password": "replace-with-a-long-password",
+        }
+        response = await client.post(
+            "/accounts",
+            json={**credentials, "role": role},
+            headers=admin_headers,
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        login = await client.post("/auth/login", json=credentials)
+        self.assertEqual(login.status_code, 200, login.text)
+        return response.json(), self.auth_headers(login.json()["access_token"])
+
     async def test_private_reads_require_auth(self):
         async with self.client() as client:
             characters = await client.get("/characters")
@@ -105,9 +125,44 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
             access_token = await self.login(client)
             characters = await client.get("/characters", headers=self.auth_headers(access_token))
             teams = await client.get("/teams", headers=self.auth_headers(access_token))
+            me = await client.get("/auth/me", headers=self.auth_headers(access_token))
 
         self.assertEqual(characters.status_code, 200)
         self.assertEqual(teams.status_code, 200)
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["role"], "admin")
+
+    async def test_admin_account_management_and_last_admin_guard(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            headers = self.auth_headers(access_token)
+            me = await client.get("/auth/me", headers=headers)
+
+            last_admin_demote = await client.patch(
+                f"/accounts/{me.json()['id']}",
+                json={"role": "player"},
+                headers=headers,
+            )
+            player, _ = await self.create_account(client, headers, "player")
+            promote = await client.patch(
+                f"/accounts/{player['id']}",
+                json={"role": "admin"},
+                headers=headers,
+            )
+            demote = await client.patch(
+                f"/accounts/{player['id']}",
+                json={"role": "player"},
+                headers=headers,
+            )
+            accounts = await client.get("/accounts", headers=headers)
+
+        self.assertEqual(last_admin_demote.status_code, 409)
+        self.assertEqual(promote.status_code, 200)
+        self.assertEqual(promote.json()["role"], "admin")
+        self.assertEqual(demote.status_code, 200)
+        self.assertEqual(demote.json()["role"], "player")
+        self.assertEqual(accounts.status_code, 200)
+        self.assertTrue(any(account["id"] == player["id"] for account in accounts.json()))
 
     async def test_refresh_cookie_rotates_and_logout_clears_cookie(self):
         async with self.client() as client:
@@ -152,6 +207,176 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(first.status_code, 201)
         self.assertEqual(duplicate.status_code, 409)
+
+    async def test_admin_can_bind_and_unbind_character_owner(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            headers = self.auth_headers(access_token)
+            player, _ = await self.create_account(client, headers, "player")
+            slug = f"owner-bind-{uuid4().hex}"
+
+            created = await client.post(
+                "/characters",
+                json={
+                    "slug": slug,
+                    "name": "Owner Bind Hero",
+                    "race": "Human",
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                },
+                headers=headers,
+            )
+            bound = await client.patch(
+                f"/characters/{slug}",
+                json={"ownerUserId": player["id"]},
+                headers=headers,
+            )
+            unbound = await client.patch(
+                f"/characters/{slug}",
+                json={"ownerUserId": None},
+                headers=headers,
+            )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertIsNone(created.json()["ownerUserId"])
+        self.assertEqual(bound.status_code, 200)
+        self.assertEqual(bound.json()["ownerUserId"], player["id"])
+        self.assertEqual(bound.json()["ownerUsername"], player["username"])
+        self.assertEqual(unbound.status_code, 200)
+        self.assertIsNone(unbound.json()["ownerUserId"])
+        self.assertIsNone(unbound.json()["ownerUsername"])
+
+    async def test_player_visibility_and_owned_character_write_rules(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            admin_headers = self.auth_headers(access_token)
+            player, player_headers = await self.create_account(client, admin_headers, "player")
+            owned_slug = f"owned-{uuid4().hex}"
+            teammate_slug = f"teammate-{uuid4().hex}"
+            unrelated_slug = f"unrelated-{uuid4().hex}"
+            team_uuid = str(uuid4())
+            unrelated_team_uuid = str(uuid4())
+
+            for payload in (
+                {
+                    "slug": owned_slug,
+                    "name": "Owned Hero",
+                    "race": "Human",
+                    "ownerUserId": player["id"],
+                },
+                {
+                    "slug": teammate_slug,
+                    "name": "Team Mate",
+                    "race": "Elf",
+                },
+                {
+                    "slug": unrelated_slug,
+                    "name": "Unrelated Hero",
+                    "race": "Dwarf",
+                },
+            ):
+                response = await client.post(
+                    "/characters",
+                    json={
+                        **payload,
+                        "stats": {"corps": 50, "mental": 50, "social": 50},
+                    },
+                    headers=admin_headers,
+                )
+                self.assertEqual(response.status_code, 201, response.text)
+
+            await client.post("/teams", json={"uuid": team_uuid, "name": "Player Team"}, headers=admin_headers)
+            await client.post(f"/teams/{team_uuid}/characters/{owned_slug}", headers=admin_headers)
+            await client.post(f"/teams/{team_uuid}/characters/{teammate_slug}", headers=admin_headers)
+            await client.post(
+                "/teams",
+                json={"uuid": unrelated_team_uuid, "name": "Hidden Team"},
+                headers=admin_headers,
+            )
+            await client.post(f"/teams/{unrelated_team_uuid}/characters/{unrelated_slug}", headers=admin_headers)
+
+            player_create_character = await client.post(
+                "/characters",
+                json={
+                    "slug": f"forbidden-{uuid4().hex}",
+                    "name": "Forbidden",
+                    "race": "Human",
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                },
+                headers=player_headers,
+            )
+            player_create_team = await client.post(
+                "/teams",
+                json={"uuid": str(uuid4()), "name": "Forbidden Team"},
+                headers=player_headers,
+            )
+            player_teams = await client.get("/teams", headers=player_headers)
+            visible_team = await client.get(f"/teams/{team_uuid}", headers=player_headers)
+            hidden_team = await client.get(f"/teams/{unrelated_team_uuid}", headers=player_headers)
+            player_characters = await client.get("/characters", headers=player_headers)
+            owned_detail = await client.get(f"/characters/{owned_slug}", headers=player_headers)
+            teammate_detail = await client.get(f"/characters/{teammate_slug}", headers=player_headers)
+            unrelated_detail = await client.get(f"/characters/{unrelated_slug}", headers=player_headers)
+            owned_patch = await client.patch(
+                f"/characters/{owned_slug}",
+                json={"gold": 5, "notes": "Player note"},
+                headers=player_headers,
+            )
+            owned_note = await client.post(
+                f"/characters/{owned_slug}/notes",
+                json={"title": "Player", "content": "Owned note tab"},
+                headers=player_headers,
+            )
+            owned_inventory = await client.post(
+                f"/characters/{owned_slug}/inventory-categories",
+                json={"name": "Player Bag"},
+                headers=player_headers,
+            )
+            teammate_patch = await client.patch(
+                f"/characters/{teammate_slug}",
+                json={"gold": 99},
+                headers=player_headers,
+            )
+            unrelated_patch = await client.patch(
+                f"/characters/{unrelated_slug}",
+                json={"gold": 99},
+                headers=player_headers,
+            )
+
+            app.dependency_overrides[get_object_storage] = lambda: FakeBackgroundStorage()
+            try:
+                owned_upload = await client.post(
+                    f"/characters/{owned_slug}/background-upload",
+                    json={"filename": "bg.webp", "content_type": "image/webp", "size": 1024},
+                    headers=player_headers,
+                )
+                teammate_upload = await client.post(
+                    f"/characters/{teammate_slug}/background-upload",
+                    json={"filename": "bg.webp", "content_type": "image/webp", "size": 1024},
+                    headers=player_headers,
+                )
+            finally:
+                app.dependency_overrides.pop(get_object_storage, None)
+
+        self.assertEqual(player_create_character.status_code, 403)
+        self.assertEqual(player_create_team.status_code, 403)
+        self.assertEqual(player_teams.status_code, 200)
+        self.assertEqual([team["uuid"] for team in player_teams.json()], [team_uuid])
+        self.assertEqual(visible_team.status_code, 200)
+        self.assertEqual({character["slug"] for character in visible_team.json()["characters"]}, {owned_slug, teammate_slug})
+        self.assertEqual(hidden_team.status_code, 404)
+        self.assertEqual(player_characters.status_code, 200)
+        self.assertEqual({character["slug"] for character in player_characters.json()}, {owned_slug, teammate_slug})
+        self.assertEqual(owned_detail.status_code, 200)
+        self.assertEqual(teammate_detail.status_code, 200)
+        self.assertEqual(unrelated_detail.status_code, 404)
+        self.assertEqual(owned_patch.status_code, 200)
+        self.assertEqual(owned_patch.json()["gold"], 5)
+        self.assertEqual(owned_note.status_code, 201)
+        self.assertEqual(owned_inventory.status_code, 201)
+        self.assertEqual(teammate_patch.status_code, 403)
+        self.assertEqual(unrelated_patch.status_code, 403)
+        self.assertEqual(owned_upload.status_code, 200)
+        self.assertEqual(teammate_upload.status_code, 403)
 
     async def test_team_character_summaries_include_roster_fields(self):
         async with self.client() as client:
@@ -201,11 +426,17 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
                 row[1]
                 for row in conn.execute("PRAGMA table_info(characters)")
             }
+            user_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(users)")
+            }
             note_columns = {
                 row[1]
                 for row in conn.execute("PRAGMA table_info(character_notes)")
             }
         self.assertIn("background_url", character_columns)
+        self.assertIn("owner_user_id", character_columns)
+        self.assertIn("role", user_columns)
         self.assertEqual(
             {"id", "character_id", "title", "content", "sort_order", "created_at", "updated_at"},
             note_columns,
