@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     db_snapshot_prefix: str = "save"
     character_image_max_size_mb: int = Field(default=5, gt=0)
     character_background_image_max_size_mb: int = Field(default=15, gt=0)
+    team_image_max_size_mb: int = Field(default=15, gt=0)
     character_image_upload_url_expires_seconds: int = Field(default=900, gt=0)
     auth_token_secret: str | None = None
     access_token_expires_seconds: int = Field(default=3600, gt=0)
@@ -70,6 +71,10 @@ class Settings(BaseSettings):
     @property
     def character_background_image_max_size_bytes(self) -> int:
         return self.character_background_image_max_size_mb * 1024 * 1024
+
+    @property
+    def team_image_max_size_bytes(self) -> int:
+        return self.team_image_max_size_mb * 1024 * 1024
 
 
 @lru_cache

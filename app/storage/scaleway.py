@@ -1,3 +1,4 @@
+import re
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 from uuid import uuid4
@@ -40,6 +41,14 @@ class ScalewayObjectStorage:
             self.settings.character_background_image_max_size_mb,
         )
 
+    def validate_team_image(self, content_type: str, size: int) -> None:
+        self._validate_character_image(
+            content_type,
+            size,
+            self.settings.team_image_max_size_bytes,
+            self.settings.team_image_max_size_mb,
+        )
+
     def _validate_character_image(self, content_type: str, size: int, max_size_bytes: int, max_size_mb: int) -> None:
         if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
             allowed = ", ".join(sorted(ALLOWED_IMAGE_CONTENT_TYPES))
@@ -58,6 +67,17 @@ class ScalewayObjectStorage:
         extension = ALLOWED_IMAGE_CONTENT_TYPES[content_type]
         filename = f"{uuid4().hex}{extension}"
         return str(PurePosixPath("characters", character_slug, "backgrounds", filename))
+
+    def create_team_illustration_key(self, team_name: str, content_type: str) -> str:
+        extension = ALLOWED_IMAGE_CONTENT_TYPES[content_type]
+        filename = f"{uuid4().hex}{extension}"
+        return str(PurePosixPath("teams", self._safe_path_segment(team_name), filename))
+
+    def _safe_path_segment(self, value: str) -> str:
+        normalized = value.strip().lower()
+        normalized = re.sub(r"[^a-z0-9._-]+", "-", normalized)
+        normalized = normalized.strip("-._")
+        return normalized or "team"
 
     def create_presigned_put_url(self, object_key: str, content_type: str) -> str:
         client = self._client()

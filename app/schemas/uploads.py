@@ -25,3 +25,11 @@ class CharacterBackgroundUploadRequest(CharacterPortraitUploadRequest):
 
 class CharacterBackgroundUploadResponse(CharacterPortraitUploadResponse):
     pass
+
+
+class TeamIllustrationUploadRequest(CharacterPortraitUploadRequest):
+    pass
+
+
+class TeamIllustrationUploadResponse(CharacterPortraitUploadResponse):
+    pass

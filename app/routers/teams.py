@@ -11,6 +11,16 @@ from sqlalchemy.orm import selectinload
 from app.auth import is_admin, require_admin_user, require_current_user
 from app.db import get_session
 from app.models import Character, Team, User, character_teams
+from app.schemas.uploads import (
+    TeamIllustrationUploadRequest,
+    TeamIllustrationUploadResponse,
+)
+from app.storage.scaleway import (
+    ScalewayObjectStorage,
+    StorageConfigurationError,
+    UploadValidationError,
+    get_object_storage,
+)
 
 router = APIRouter()
 
@@ -26,6 +36,10 @@ class TeamCreate(BaseModel):
 
 class TeamUpdate(BaseModel):
     name: TeamName | None = None
+    illustrationUrl: HttpUrl | None = None
+
+
+class TeamIllustrationUpdate(BaseModel):
     illustrationUrl: HttpUrl | None = None
 
 
@@ -151,6 +165,50 @@ async def get_team(
 ):
     team = await get_team_or_404(team_uuid, session)
     await require_team_visible(team, current_user, session)
+    return serialize_team(team)
+
+
+@router.post("/{team_uuid}/illustration-upload", response_model=TeamIllustrationUploadResponse)
+async def create_team_illustration_upload(
+    team_uuid: UUID,
+    body: TeamIllustrationUploadRequest,
+    current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+    storage: ScalewayObjectStorage = Depends(get_object_storage),
+):
+    team = await get_team_or_404(team_uuid, session)
+    await require_team_visible(team, current_user, session)
+
+    try:
+        storage.validate_team_image(body.content_type, body.size)
+        object_key = storage.create_team_illustration_key(team.name, body.content_type)
+        upload_url = storage.create_presigned_put_url(object_key, body.content_type)
+        public_url = storage.public_url(object_key)
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StorageConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return TeamIllustrationUploadResponse(
+        upload_url=upload_url,
+        object_key=object_key,
+        public_url=public_url,
+        expires_in=storage.settings.character_image_upload_url_expires_seconds,
+    )
+
+
+@router.patch("/{team_uuid}/illustration", status_code=200)
+async def patch_team_illustration(
+    team_uuid: UUID,
+    body: TeamIllustrationUpdate,
+    current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    team = await get_team_or_404(team_uuid, session)
+    await require_team_visible(team, current_user, session)
+
+    team.illustration_url = str(body.illustrationUrl) if body.illustrationUrl else None
+    await session.commit()
     return serialize_team(team)
 
 
