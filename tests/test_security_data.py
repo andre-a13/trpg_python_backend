@@ -1,4 +1,5 @@
 import atexit
+import asyncio
 import os
 import sqlite3
 import tempfile
@@ -119,6 +120,26 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(characters.status_code, 401)
         self.assertEqual(teams.status_code, 401)
+
+    async def test_cors_preflight_allows_deck_composition_put(self):
+        async with self.client() as client:
+            response = await client.options(
+                "/characters/example/deck/composition",
+                headers={
+                    "Origin": "http://127.0.0.1:5173",
+                    "Access-Control-Request-Method": "PUT",
+                    "Access-Control-Request-Headers": (
+                        "authorization,content-type,ngrok-skip-browser-warning"
+                    ),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.headers.get("access-control-allow-origin"),
+            "http://127.0.0.1:5173",
+        )
+        self.assertIn("PUT", response.headers.get("access-control-allow-methods", ""))
 
     async def test_authenticated_reads_succeed(self):
         async with self.client() as client:
@@ -861,3 +882,300 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(patch.status_code, 200)
         self.assertEqual(patch.json()["inventory"], ["new", "still legacy"])
+
+    async def test_hearthstone_catalog_activation_and_deck_lifecycle(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            admin_headers = self.auth_headers(access_token)
+            player, player_headers = await self.create_account(client, admin_headers, "player")
+            slug = f"hearth-{uuid4().hex}"
+            created = await client.post(
+                "/characters",
+                json={
+                    "slug": slug,
+                    "name": "Hearth Hero",
+                    "race": "Human",
+                    "ownerUserId": player["id"],
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                },
+                headers=admin_headers,
+            )
+            self.assertEqual(created.status_code, 201, created.text)
+
+            catalog = await client.get(
+                "/hearthstone/cards",
+                params={"q": "heros defunt", "pageSize": 10},
+                headers=player_headers,
+            )
+            self.assertEqual(catalog.status_code, 200, catalog.text)
+            catalog_body = catalog.json()
+            catalog_card = next(item for item in catalog_body["items"] if item["id"] == "AT_003")
+            self.assertEqual(
+                catalog_card["renderUrl"],
+                "https://art.hearthstonejson.com/v1/render/latest/frFR/512x/AT_003.png",
+            )
+            self.assertEqual(catalog_card["cardSet"], "TGT")
+            self.assertEqual(catalog_card["cardSetName"], "Le Grand Tournoi")
+            self.assertEqual(len(catalog_body["sets"]), 40)
+            self.assertEqual(
+                sum(card_set["cardCount"] for card_set in catalog_body["sets"]),
+                5845,
+            )
+            self.assertIn(
+                {"code": "__UNASSIGNED__", "name": "Ensemble fondamental sans code de set", "cardCount": 127},
+                catalog_body["sets"],
+            )
+            filtered_catalog = await client.get(
+                "/hearthstone/cards",
+                params={"cardSet": "TGT", "pageSize": 100},
+                headers=player_headers,
+            )
+            self.assertEqual(filtered_catalog.status_code, 200, filtered_catalog.text)
+            self.assertEqual(filtered_catalog.json()["total"], 132)
+            self.assertTrue(all(item["cardSet"] == "TGT" for item in filtered_catalog.json()["items"]))
+
+            forbidden_activation = await client.patch(
+                f"/characters/{slug}/hearthstomancer",
+                json={"enabled": True},
+                headers=player_headers,
+            )
+            self.assertEqual(forbidden_activation.status_code, 403)
+            activation = await client.patch(
+                f"/characters/{slug}/hearthstomancer",
+                json={"enabled": True},
+                headers=admin_headers,
+            )
+            self.assertEqual(activation.status_code, 200, activation.text)
+
+            opened_pack = await client.post(
+                f"/characters/{slug}/deck/pack/open",
+                json={"cardSet": "TGT"},
+                headers=player_headers,
+            )
+            self.assertEqual(opened_pack.status_code, 200, opened_pack.text)
+            pack_cards = opened_pack.json()["cards"]
+            self.assertEqual(len(pack_cards), 5)
+            self.assertEqual(len({card["id"] for card in pack_cards}), 5)
+            self.assertTrue(all(card["cardSet"] == "TGT" for card in pack_cards))
+            saved_pack = await client.post(
+                f"/characters/{slug}/deck/pack/save",
+                json={"sourceCardIds": [card["id"] for card in pack_cards]},
+                headers=player_headers,
+            )
+            self.assertEqual(saved_pack.status_code, 200, saved_pack.text)
+            self.assertEqual(saved_pack.json()["counts"]["total"], 5)
+            self.assertTrue(all(
+                definition["isVariant"] is False
+                for definition in saved_pack.json()["definitions"]
+            ))
+
+            composition = await client.put(
+                f"/characters/{slug}/deck/composition",
+                json={
+                    "definitions": [
+                        {
+                            "sourceCardId": "AT_003",
+                            "name": "Heros JDR",
+                            "attack": 7,
+                            "text": "Effet personnalise",
+                            "normalCount": 1,
+                            "goldenCount": 0,
+                        },
+                        {
+                            "sourceCardId": "AT_003",
+                            "name": "Heros JDR",
+                            "attack": 7,
+                            "text": "Effet personnalise",
+                            "normalCount": 0,
+                            "goldenCount": 1,
+                        },
+                    ]
+                },
+                headers=player_headers,
+            )
+            self.assertEqual(composition.status_code, 200, composition.text)
+            body = composition.json()
+            self.assertEqual(body["counts"], {"total": 2, "remaining": 2, "drawn": 0})
+            self.assertEqual(len(body["definitions"]), 1)
+            self.assertEqual(body["definitions"][0]["normalCount"], 1)
+            self.assertEqual(body["definitions"][0]["goldenCount"], 1)
+            self.assertTrue(body["definitions"][0]["isVariant"])
+
+            for _ in range(2):
+                drawn = await client.post(f"/characters/{slug}/deck/draw", headers=player_headers)
+                self.assertEqual(drawn.status_code, 200, drawn.text)
+            state = drawn.json()
+            normal = next(card for card in state["drawnCards"] if not card["isGolden"])
+            golden = next(card for card in state["drawnCards"] if card["isGolden"])
+
+            golden_play = await client.post(
+                f"/characters/{slug}/deck/copies/{golden['copyId']}/play",
+                headers=player_headers,
+            )
+            self.assertEqual(golden_play.status_code, 409)
+            played = await client.post(
+                f"/characters/{slug}/deck/copies/{normal['copyId']}/play",
+                headers=player_headers,
+            )
+            self.assertEqual(played.status_code, 200, played.text)
+            self.assertIsNotNone(played.json()["undoablePlay"])
+            undone = await client.post(f"/characters/{slug}/deck/undo-play", headers=player_headers)
+            self.assertEqual(undone.status_code, 200, undone.text)
+            self.assertEqual(undone.json()["counts"]["drawn"], 2)
+
+            forbidden_drawn_removal = await client.post(
+                f"/characters/{slug}/deck/remove",
+                json={
+                    "zone": "drawn",
+                    "definitionId": golden["definition"]["id"],
+                    "isGolden": True,
+                    "copyId": golden["copyId"],
+                },
+                headers=player_headers,
+            )
+            self.assertEqual(forbidden_drawn_removal.status_code, 422)
+
+            discarded = await client.post(
+                f"/characters/{slug}/deck/copies/{normal['copyId']}/discard",
+                headers=player_headers,
+            )
+            self.assertEqual(discarded.status_code, 200, discarded.text)
+            discarded_golden = await client.post(
+                f"/characters/{slug}/deck/copies/{golden['copyId']}/discard",
+                headers=player_headers,
+            )
+            self.assertEqual(discarded_golden.status_code, 200, discarded_golden.text)
+            removed_golden = await client.post(
+                f"/characters/{slug}/deck/remove",
+                json={
+                    "zone": "deck",
+                    "definitionId": golden["definition"]["id"],
+                    "isGolden": True,
+                },
+                headers=player_headers,
+            )
+            self.assertEqual(removed_golden.status_code, 200, removed_golden.text)
+            self.assertEqual(removed_golden.json()["counts"]["total"], 1)
+
+            definition = removed_golden.json()["definitions"][0]
+            removed_normal = await client.post(
+                f"/characters/{slug}/deck/remove",
+                json={
+                    "zone": "deck",
+                    "definitionId": definition["id"],
+                    "isGolden": False,
+                },
+                headers=player_headers,
+            )
+            self.assertEqual(removed_normal.status_code, 200, removed_normal.text)
+            self.assertEqual(removed_normal.json()["definitions"], [])
+
+            deactivation = await client.patch(
+                f"/characters/{slug}/hearthstomancer",
+                json={"enabled": False},
+                headers=admin_headers,
+            )
+            self.assertEqual(deactivation.status_code, 200)
+            inactive_read = await client.get(f"/characters/{slug}/deck", headers=player_headers)
+            inactive_draw = await client.post(f"/characters/{slug}/deck/draw", headers=player_headers)
+
+        self.assertEqual(inactive_read.status_code, 200)
+        self.assertFalse(inactive_read.json()["enabled"])
+        self.assertEqual(inactive_draw.status_code, 409)
+
+    async def test_hearthstomancer_team_read_only_and_play_finalization(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            admin_headers = self.auth_headers(access_token)
+            owner, owner_headers = await self.create_account(client, admin_headers, "player")
+            teammate, teammate_headers = await self.create_account(client, admin_headers, "player")
+            owner_slug = f"deck-owner-{uuid4().hex}"
+            teammate_slug = f"deck-reader-{uuid4().hex}"
+            team_uuid = str(uuid4())
+
+            for slug, owner_id in ((owner_slug, owner["id"]), (teammate_slug, teammate["id"])):
+                response = await client.post(
+                    "/characters",
+                    json={
+                        "slug": slug,
+                        "name": slug,
+                        "race": "Human",
+                        "ownerUserId": owner_id,
+                        "stats": {"corps": 50, "mental": 50, "social": 50},
+                    },
+                    headers=admin_headers,
+                )
+                self.assertEqual(response.status_code, 201, response.text)
+            await client.post("/teams", json={"uuid": team_uuid, "name": "Deck Team"}, headers=admin_headers)
+            await client.post(f"/teams/{team_uuid}/characters/{owner_slug}", headers=admin_headers)
+            await client.post(f"/teams/{team_uuid}/characters/{teammate_slug}", headers=admin_headers)
+            await client.patch(
+                f"/characters/{owner_slug}/hearthstomancer",
+                json={"enabled": True},
+                headers=admin_headers,
+            )
+            await client.put(
+                f"/characters/{owner_slug}/deck/composition",
+                json={"definitions": [{"sourceCardId": "AT_003", "normalCount": 1}]},
+                headers=owner_headers,
+            )
+
+            teammate_read = await client.get(f"/characters/{owner_slug}/deck", headers=teammate_headers)
+            teammate_draw = await client.post(f"/characters/{owner_slug}/deck/draw", headers=teammate_headers)
+            self.assertEqual(teammate_read.status_code, 200, teammate_read.text)
+            self.assertFalse(teammate_read.json()["permissions"]["canManage"])
+            self.assertEqual(teammate_draw.status_code, 403)
+
+            drawn = await client.post(f"/characters/{owner_slug}/deck/draw", headers=owner_headers)
+            copy_id = drawn.json()["drawnCards"][0]["copyId"]
+            played = await client.post(
+                f"/characters/{owner_slug}/deck/copies/{copy_id}/play",
+                headers=owner_headers,
+            )
+            self.assertIsNotNone(played.json()["undoablePlay"])
+            reset = await client.post(f"/characters/{owner_slug}/deck/reset", headers=owner_headers)
+            late_undo = await client.post(f"/characters/{owner_slug}/deck/undo-play", headers=owner_headers)
+
+        self.assertEqual(reset.status_code, 200, reset.text)
+        self.assertEqual(reset.json()["counts"]["total"], 0)
+        self.assertEqual(reset.json()["definitions"], [])
+        self.assertEqual(late_undo.status_code, 409)
+
+    async def test_concurrent_hearthstomancer_draws_never_return_the_same_copy(self):
+        async with self.client() as client:
+            access_token = await self.login(client)
+            headers = self.auth_headers(access_token)
+            slug = f"deck-concurrent-{uuid4().hex}"
+            await client.post(
+                "/characters",
+                json={
+                    "slug": slug,
+                    "name": "Concurrent Hero",
+                    "race": "Human",
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                },
+                headers=headers,
+            )
+            await client.patch(
+                f"/characters/{slug}/hearthstomancer",
+                json={"enabled": True},
+                headers=headers,
+            )
+            await client.put(
+                f"/characters/{slug}/deck/composition",
+                json={"definitions": [{"sourceCardId": "AT_003", "normalCount": 2}]},
+                headers=headers,
+            )
+
+            responses = await asyncio.gather(
+                client.post(f"/characters/{slug}/deck/draw", headers=headers),
+                client.post(f"/characters/{slug}/deck/draw", headers=headers),
+            )
+            self.assertTrue(all(response.status_code in {200, 409} for response in responses))
+            successful = [response for response in responses if response.status_code == 200]
+            self.assertGreaterEqual(len(successful), 1)
+            state = await client.get(f"/characters/{slug}/deck", headers=headers)
+
+        drawn_ids = [card["copyId"] for card in state.json()["drawnCards"]]
+        self.assertEqual(len(drawn_ids), len(set(drawn_ids)))
+        self.assertEqual(len(drawn_ids), len(successful))

@@ -177,6 +177,10 @@ def serialize_character(
         "notes": first_note_content(c),
         "current_hp": c.current_hp,
         "bonusHealth": c.bonus_health,
+        "hearthstomancer": {
+            "configured": c.deck is not None,
+            "enabled": bool(c.deck and c.deck.enabled),
+        },
         "teams": [
             {
                 "uuid": team.uuid,
@@ -207,7 +211,12 @@ async def get_character_or_404(
     session: AsyncSession,
     include_inventory_categories: bool = False,
 ) -> Character:
-    options = [selectinload(Character.teams), selectinload(Character.note_tabs), selectinload(Character.owner)]
+    options = [
+        selectinload(Character.teams),
+        selectinload(Character.note_tabs),
+        selectinload(Character.owner),
+        selectinload(Character.deck),
+    ]
     if include_inventory_categories:
         options.append(selectinload(Character.inventory_categories).selectinload(InventoryCategory.contents))
 
@@ -417,7 +426,12 @@ async def list_characters(
 ):
     query = (
         select(Character)
-        .options(selectinload(Character.teams), selectinload(Character.note_tabs), selectinload(Character.owner))
+        .options(
+            selectinload(Character.teams),
+            selectinload(Character.note_tabs),
+            selectinload(Character.owner),
+            selectinload(Character.deck),
+        )
         .order_by(Character.id)
         .limit(limit)
         .offset(offset)
