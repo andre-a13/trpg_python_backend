@@ -1,6 +1,7 @@
 import atexit
 import asyncio
 import os
+import random
 import sqlite3
 import tempfile
 import unittest
@@ -24,6 +25,13 @@ from app.db import engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.migrations import MIGRATIONS, run_migrations  # noqa: E402
 from app.config import Settings  # noqa: E402
+from app.hearthstone_catalog import (  # noqa: E402
+    HEARTHSTONE_RARITY_RATES,
+    PACK_RARITY_TARGETS,
+    RARE_OR_BETTER,
+    _ordinary_slot_weights,
+    weighted_pack_sample,
+)
 from app.storage.scaleway import ScalewayObjectStorage, UploadValidationError, get_object_storage  # noqa: E402
 
 
@@ -882,6 +890,33 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(patch.status_code, 200)
         self.assertEqual(patch.json()["inventory"], ["new", "still legacy"])
+
+    async def test_hearthstone_pack_rarity_weights(self):
+        self.assertGreater(PACK_RARITY_TARGETS["EPIC"], HEARTHSTONE_RARITY_RATES["EPIC"])
+        self.assertGreater(PACK_RARITY_TARGETS["LEGENDARY"], HEARTHSTONE_RARITY_RATES["LEGENDARY"])
+
+        cards = [
+            {"id": f"{rarity}-{index}", "rarity": rarity}
+            for rarity in PACK_RARITY_TARGETS
+            for index in range(25)
+        ]
+        random_source = random.Random(20261006)
+        ordinary_weights = _ordinary_slot_weights(5)
+        rare_plus_total = sum(PACK_RARITY_TARGETS[rarity] for rarity in RARE_OR_BETTER)
+
+        for rarity, target in PACK_RARITY_TARGETS.items():
+            guaranteed_share = (
+                PACK_RARITY_TARGETS[rarity] / rare_plus_total
+                if rarity in RARE_OR_BETTER
+                else 0
+            )
+            expected_per_pack = guaranteed_share + 4 * ordinary_weights[rarity]
+            self.assertAlmostEqual(expected_per_pack, 5 * target / 100)
+
+        for _ in range(100):
+            pack = weighted_pack_sample(cards, 5, random_source)
+            self.assertEqual(len({card["id"] for card in pack}), 5)
+            self.assertTrue(any(card["rarity"] != "COMMON" for card in pack))
 
     async def test_hearthstone_catalog_activation_and_deck_lifecycle(self):
         async with self.client() as client:

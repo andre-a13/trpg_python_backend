@@ -18,7 +18,7 @@ Fournir à chaque personnage autorisé un deck persistant de cartes Hearthstone 
 - Une carte normale ou dorée peut être supprimée volontairement directement depuis le paquet, une copie à la fois et sans modale de confirmation. Une carte tirée doit d'abord être défaussée pour revenir dans le paquet. Cette suppression est définitive, sans motif ni historique et sans annulation.
 - Reset remet les cartes tirées dans le paquet et mélange, sans restaurer les cartes jouées ou supprimées.
 - La sauvegarde de composition réinitialise et mélange le paquet.
-- L'ouverture d'un paquet choisit cinq cartes collectionnables distinctes dans l'extension sélectionnée ; les cartes restent visibles après leur révélation puis les cinq copies normales sont ajoutées ensemble au deck lors de l'enregistrement, sans déplacer les cartes déjà tirées.
+- L'ouverture d'un paquet choisit cinq cartes collectionnables distinctes dans l'extension sélectionnée, avec au moins une carte rare ou supérieure. Les raretés cibles sont 69,25 % commune, 24 % rare, 5,25 % épique et 1,50 % légendaire ; les cartes `FREE` des sets techniques sont assimilées aux communes. Les cartes restent visibles après leur révélation puis les cinq copies normales sont ajoutées ensemble au deck lors de l'enregistrement, sans déplacer les cartes déjà tirées.
 - Un deck désactivé reste visible en lecture seule et conserve son état.
 - Admin : activation, composition et jeu. Propriétaire : composition et jeu si actif. Coéquipier visible : lecture seule.
 - L'interface est bilingue FR/EN ; le contenu des cartes reste en français.
@@ -181,4 +181,11 @@ Fournir à chaque personnage autorisé un deck persistant de cartes Hearthstone 
 - Objectif : déployer en production les itérations Hearthstomancien validées, puis vérifier la disponibilité des services et des nouveaux contrats API.
 - Changements : à compléter.
 - Vérifications : à compléter.
+
+### Itération 16 — Pondération des raretés à l'ouverture d'un paquet
+
+- Statut : En cours
+- Objectif : rapprocher le tirage de cinq cartes des taux publiés pour les paquets Hearthstone, tout en accordant un léger bonus aux cartes épiques et légendaires.
+- Changements : taux Hearthstone de référence consignés (commune 71,65 %, rare 22,84 %, épique 4,42 %, légendaire 1,10 %) ; taux cibles retenus : commune 69,25 %, rare 24 %, épique 5,25 % et légendaire 1,50 % ; ajout d'un emplacement rare ou supérieur garanti puis de quatre emplacements calibrés afin de préserver les taux cibles finaux ; tirage sans remise et ordre final remélangé ; assimilation de la rareté technique `FREE` à commune. Sources consultées : boutique Battle.net, annonce Blizzard sur les paquets de rattrapage et statistiques Hearthstone Wiki issues des taux publiés.
+- Vérifications : test ciblé réussi ; calibration mathématique des quatre taux, garantie rare ou supérieure et unicité des cinq identifiants vérifiées ; simulation déterministe de 20 000 paquets : commune 69,192 %, rare 24,019 %, épique 5,256 %, légendaire 1,533 % ; suite backend complète réussie (25 tests). Déploiement à compléter.
 

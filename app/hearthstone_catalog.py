@@ -13,6 +13,25 @@ CATALOG_PATH = Path(__file__).with_name("data") / "cards.frFR.json"
 _TAG_RE = re.compile(r"<[^>]+>")
 UNASSIGNED_SET_CODE = "__UNASSIGNED__"
 
+# Published/observed Hearthstone pack rates are approximately 71.65% common,
+# 22.84% rare, 4.42% epic and 1.10% legendary per card. The application uses
+# a deliberately modest boost for epic and legendary cards while retaining a
+# guaranteed rare-or-better slot in every five-card pack.
+HEARTHSTONE_RARITY_RATES = {
+    "COMMON": 71.65,
+    "RARE": 22.84,
+    "EPIC": 4.42,
+    "LEGENDARY": 1.10,
+}
+PACK_RARITY_TARGETS = {
+    "COMMON": 69.25,
+    "RARE": 24.00,
+    "EPIC": 5.25,
+    "LEGENDARY": 1.50,
+}
+PACK_RARITIES = tuple(PACK_RARITY_TARGETS)
+RARE_OR_BETTER = ("RARE", "EPIC", "LEGENDARY")
+
 # HearthstoneJSON exposes stable enum codes in the `set` field. Keep the raw
 # code for filtering and persistence, while exposing a readable French
 # expansion name to the client. The two technical groups at the end are part
@@ -173,11 +192,95 @@ def search_collectible_cards(
     return list(rows[start:start + page_size]), total
 
 
-def random_collectible_cards(card_set: str, count: int = 5) -> list[dict[str, Any]]:
+def _pack_rarity(card: dict[str, Any]) -> str:
+    rarity = str(card.get("rarity") or "").upper()
+    # Hearthstone's FREE cards have no pack rarity. Treat them like commons so
+    # technical/core sets remain usable by the custom pack opener.
+    return rarity if rarity in PACK_RARITY_TARGETS else "COMMON"
+
+
+def _weighted_rarity_choice(
+    pools: dict[str, list[dict[str, Any]]],
+    weights: dict[str, float],
+    allowed: tuple[str, ...],
+    rng: Any,
+) -> str | None:
+    available = [rarity for rarity in allowed if pools.get(rarity) and weights.get(rarity, 0) > 0]
+    if not available:
+        return None
+
+    threshold = rng.random() * sum(weights[rarity] for rarity in available)
+    cumulative = 0.0
+    for rarity in available:
+        cumulative += weights[rarity]
+        if threshold < cumulative:
+            return rarity
+    return available[-1]
+
+
+def _ordinary_slot_weights(count: int) -> dict[str, float]:
+    """Calibrate non-guaranteed slots so final five-card rates meet targets."""
+    rare_plus_total = sum(PACK_RARITY_TARGETS[rarity] for rarity in RARE_OR_BETTER)
+    guaranteed_share = {
+        rarity: PACK_RARITY_TARGETS[rarity] / rare_plus_total
+        for rarity in RARE_OR_BETTER
+    }
+    ordinary_slots = max(count - 1, 1)
+    return {
+        rarity: max(
+            0.0,
+            (
+                count * PACK_RARITY_TARGETS[rarity] / 100
+                - guaranteed_share.get(rarity, 0.0)
+            ) / ordinary_slots,
+        )
+        for rarity in PACK_RARITIES
+    }
+
+
+def weighted_pack_sample(
+    rows: list[dict[str, Any]],
+    count: int = 5,
+    rng: Any | None = None,
+) -> list[dict[str, Any]]:
+    if count <= 0 or len(rows) < count:
+        return []
+
+    random_source = rng or secrets.SystemRandom()
+    pools = {rarity: [] for rarity in PACK_RARITIES}
+    for card in rows:
+        pools[_pack_rarity(card)].append(card)
+
+    selected: list[dict[str, Any]] = []
+    guaranteed_rarity = _weighted_rarity_choice(
+        pools,
+        PACK_RARITY_TARGETS,
+        RARE_OR_BETTER,
+        random_source,
+    )
+    if guaranteed_rarity is not None:
+        guaranteed_pool = pools[guaranteed_rarity]
+        selected.append(guaranteed_pool.pop(random_source.randrange(len(guaranteed_pool))))
+
+    ordinary_weights = _ordinary_slot_weights(count) if guaranteed_rarity is not None else PACK_RARITY_TARGETS
+    while len(selected) < count:
+        rarity = _weighted_rarity_choice(pools, ordinary_weights, PACK_RARITIES, random_source)
+        if rarity is None:
+            return []
+        pool = pools[rarity]
+        selected.append(pool.pop(random_source.randrange(len(pool))))
+
+    random_source.shuffle(selected)
+    return selected
+
+
+def random_collectible_cards(
+    card_set: str,
+    count: int = 5,
+    rng: Any | None = None,
+) -> list[dict[str, Any]]:
     rows = [
         card for card in collectible_cards()
         if card_set_code(card.get("cardSet")) == card_set
     ]
-    if len(rows) < count:
-        return []
-    return secrets.SystemRandom().sample(rows, count)
+    return weighted_pack_sample(rows, count, rng)
