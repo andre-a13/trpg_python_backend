@@ -177,15 +177,15 @@ Fournir à chaque personnage autorisé un deck persistant de cartes Hearthstone 
 
 ### Itération 15 — Déploiement en production
 
-- Statut : En cours
+- Statut : Terminée
 - Objectif : déployer en production les itérations Hearthstomancien validées, puis vérifier la disponibilité des services et des nouveaux contrats API.
-- Changements : à compléter.
-- Vérifications : à compléter.
+- Changements : publication du backend Hearthstomancien sur le commit de production `f388c51`, puis de la pondération des paquets sur `40d7f52` ; publication du frontend combinant la Forge existante et le deck sur `9c4848c` ; reconstruction et recréation des deux conteneurs Docker ; conservation de la base active et création, avant chaque déploiement backend, d'une sauvegarde locale et d'un snapshot S3. Dernières sauvegardes : `data/backups/data-20261006T182818Z.db` et `save/data-20261006T182820Z.db`.
+- Vérifications : images Docker construites avec succès ; conteneurs `trpg-api` et `trpg-frontend-app` sains ; `https://api.arnaud-a.dev/health` répond `{"ok":true}` ; `https://game.arnaud-a.dev/characters/hearth-qa/deck` répond HTTP 200 ; contrôle automatisé dans le conteneur backend de 50 paquets conformes. Aucun test UI par navigateur n'a été effectué.
 
 ### Itération 16 — Pondération des raretés à l'ouverture d'un paquet
 
-- Statut : En cours
+- Statut : Terminée
 - Objectif : rapprocher le tirage de cinq cartes des taux publiés pour les paquets Hearthstone, tout en accordant un léger bonus aux cartes épiques et légendaires.
 - Changements : taux Hearthstone de référence consignés (commune 71,65 %, rare 22,84 %, épique 4,42 %, légendaire 1,10 %) ; taux cibles retenus : commune 69,25 %, rare 24 %, épique 5,25 % et légendaire 1,50 % ; ajout d'un emplacement rare ou supérieur garanti puis de quatre emplacements calibrés afin de préserver les taux cibles finaux ; tirage sans remise et ordre final remélangé ; assimilation de la rareté technique `FREE` à commune. Sources consultées : boutique Battle.net, annonce Blizzard sur les paquets de rattrapage et statistiques Hearthstone Wiki issues des taux publiés.
-- Vérifications : test ciblé réussi ; calibration mathématique des quatre taux, garantie rare ou supérieure et unicité des cinq identifiants vérifiées ; simulation déterministe de 20 000 paquets : commune 69,192 %, rare 24,019 %, épique 5,256 %, légendaire 1,533 % ; suite backend complète réussie (25 tests). Déploiement à compléter.
+- Vérifications : test ciblé réussi ; calibration mathématique des quatre taux, garantie rare ou supérieure et unicité des cinq identifiants vérifiées ; simulation déterministe de 20 000 paquets : commune 69,192 %, rare 24,019 %, épique 5,256 %, légendaire 1,533 % ; suite backend complète réussie (25 tests) ; contrôle de 50 paquets dans le conteneur de production réussi après déploiement.
 
