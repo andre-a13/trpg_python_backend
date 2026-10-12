@@ -189,3 +189,31 @@ Fournir à chaque personnage autorisé un deck persistant de cartes Hearthstone 
 - Changements : taux Hearthstone de référence consignés (commune 71,65 %, rare 22,84 %, épique 4,42 %, légendaire 1,10 %) ; taux cibles retenus : commune 69,25 %, rare 24 %, épique 5,25 % et légendaire 1,50 % ; ajout d'un emplacement rare ou supérieur garanti puis de quatre emplacements calibrés afin de préserver les taux cibles finaux ; tirage sans remise et ordre final remélangé ; assimilation de la rareté technique `FREE` à commune. Sources consultées : boutique Battle.net, annonce Blizzard sur les paquets de rattrapage et statistiques Hearthstone Wiki issues des taux publiés.
 - Vérifications : test ciblé réussi ; calibration mathématique des quatre taux, garantie rare ou supérieure et unicité des cinq identifiants vérifiées ; simulation déterministe de 20 000 paquets : commune 69,192 %, rare 24,019 %, épique 5,256 %, légendaire 1,533 % ; suite backend complète réussie (25 tests) ; contrôle de 50 paquets dans le conteneur de production réussi après déploiement.
 
+### Itération 17 — Audit d'intégration navigateur et proposition UX
+
+- Statut : Terminée
+- Objectif : exécuter un batch de vérifications backend/frontend et un parcours d'intégration réel dans le navigateur sur la production, puis proposer des améliorations priorisées pour gagner en lisibilité, feedback et plaisir d'utilisation.
+- Changements : aucun changement fonctionnel ; création d'une copie isolée de la base QA pour tester sans modifier les decks de production ; formalisation du backlog UX ci-dessous.
+- Vérifications : suite backend réussie (25 tests) ; suite frontend réussie (21 tests), lint et build de production réussis ; parcours de production validé pour la connexion, la liste des compagnies et le deck actif vide d'`aleatarius` ; parcours navigateur complet validé sur la copie QA pour les vues complète/minimaliste, l'infobulle illustrée, la recherche et le filtre d'extension, l'ajout puis la sauvegarde d'une carte, la pioche, la défausse, le jeu et son annulation, ainsi que la sélection d'un set, la révélation et la sauvegarde de cinq cartes ; toutes les requêtes CORS/API du parcours ont répondu 200 et aucune erreur console n'a été relevée ; contrôle responsive effectué à 390 × 844 px.
+
+#### Constats issus de l'audit
+
+- Priorité haute : l'image distante utilisée comme dos de carte ne se charge pas ; les cinq cartes fermées apparaissent comme des cadres bleus avec une image cassée.
+- Priorité haute : les images des faces avant et leurs textes alternatifs existent avant la révélation ; le snapshot d'accessibilité expose ainsi les noms des cinq cartes cachées.
+- Priorité moyenne : la vue minimaliste QA comporte 45 lignes et instancie 45 images distantes dans les infobulles, même sans survol ; elle est visuellement compacte mais pas légère en ressources.
+- Priorité moyenne : la vue minimaliste masque les compteurs total/paquet/tirées, alors qu'ils sont utiles pendant une partie.
+- Priorité moyenne : sur mobile, le titre Composition et ses deux actions se disputent la même ligne ; les boutons et quantités passent sur plusieurs lignes de manière peu équilibrée.
+- Priorité basse : une URL de deck absente ou inaccessible affiche uniquement « Impossible de charger le deck » sans distinguer 404, droits insuffisants ou erreur réseau, ni proposer de retour ou de nouvelle tentative.
+- Le build reste valide mais le bundle principal atteint environ 550 kB minifié et déclenche l'avertissement Vite de chunk supérieur à 500 kB.
+
+#### Backlog UX proposé
+
+1. **Fiabilité immédiate** : intégrer le dos de carte comme asset local versionné ; ne monter la face avant et son `alt` qu'après révélation ; ajouter un état d'erreur contextualisé avec Réessayer et Retour à la fiche.
+2. **Mode Jeu dédié** : faire de la main tirée l'élément principal, avec grand bouton de pioche, compteur de paquet, cartes disposées en éventail ou bande horizontale et actions Jouer/Défausser directement visibles ; replier la composition pendant la partie.
+3. **Vue minimaliste réellement légère** : conserver la liste texte, charger l'illustration uniquement au premier survol/focus, réafficher les trois compteurs et rendre l'en-tête d'actions collant lors du défilement.
+4. **Lecture du deck** : ajouter courbe de mana, compteurs par rareté/type/classe, recherche dans le deck courant, tris Coût/Nom/Rareté et filtres Normal/Doré ; conserver normales et dorées dans deux groupes explicites.
+5. **Constructeur plus rapide** : ajouter filtres rareté, type et classe, mémoriser les derniers filtres, afficher immédiatement la quantité déjà possédée et proposer les actions + normale/+ dorée directement sur les résultats sans perdre l'éditeur de variante.
+6. **Ouverture plus ludique** : halo et son optionnel selon la rareté, vibration visuelle avant une épique/légendaire, animation de transfert vers le deck après Enregistrer et résumé final des cinq raretés ; toujours prévoir un interrupteur Son/Animations réduites.
+7. **Feedback des actions** : animer la carte depuis le paquet vers la main, vers le paquet lors d'une défausse et vers une zone Jouée lors du jeu ; conserver un toast lisible avec nom de la carte et action annulable lorsque la règle le permet.
+8. **Performance frontend** : découper les routes Deck et Forge en chargement différé, puis mesurer avant d'envisager une virtualisation de la liste ; objectif initial : supprimer l'avertissement de bundle principal et éviter tout téléchargement d'image invisible.
+
