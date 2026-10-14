@@ -287,6 +287,80 @@ async def _roles_and_character_ownership(conn: AsyncConnection) -> None:
     await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_characters_owner_user_id ON characters (owner_user_id)")
 
 
+async def _hearthstomancer_decks(conn: AsyncConnection) -> None:
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS character_decks (
+            id INTEGER NOT NULL,
+            character_id INTEGER NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            revision INTEGER NOT NULL DEFAULT 0,
+            undo_copy_id INTEGER,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            CONSTRAINT uq_character_decks_character_id UNIQUE (character_id),
+            FOREIGN KEY(character_id) REFERENCES characters (id) ON DELETE CASCADE
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_character_decks_character_id ON character_decks (character_id)"
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS deck_card_definitions (
+            id INTEGER NOT NULL,
+            deck_id INTEGER NOT NULL,
+            source_card_id VARCHAR(100),
+            fingerprint VARCHAR(64) NOT NULL,
+            name VARCHAR(200) NOT NULL,
+            cost INTEGER,
+            attack INTEGER,
+            health INTEGER,
+            durability INTEGER,
+            effect_text TEXT NOT NULL DEFAULT '',
+            card_type VARCHAR(80),
+            rarity VARCHAR(80),
+            card_class VARCHAR(80),
+            tribe VARCHAR(120),
+            spell_school VARCHAR(80),
+            card_set VARCHAR(120),
+            illustration_url VARCHAR(2048),
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            CONSTRAINT uq_deck_card_definition_fingerprint UNIQUE (deck_id, fingerprint),
+            FOREIGN KEY(deck_id) REFERENCES character_decks (id) ON DELETE CASCADE
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_deck_card_definitions_deck_id ON deck_card_definitions (deck_id)"
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS deck_card_copies (
+            id INTEGER NOT NULL,
+            definition_id INTEGER NOT NULL,
+            is_golden BOOLEAN NOT NULL DEFAULT 0,
+            zone VARCHAR(20) NOT NULL DEFAULT 'deck',
+            shuffle_key INTEGER,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            FOREIGN KEY(definition_id) REFERENCES deck_card_definitions (id) ON DELETE CASCADE
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_deck_card_copies_definition_id ON deck_card_copies (definition_id)"
+    )
+    await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_deck_card_copies_zone ON deck_card_copies (zone)")
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_deck_card_copies_shuffle_key ON deck_card_copies (shuffle_key)"
+    )
+
+
 MIGRATIONS: list[Migration] = [
     ("001_initial_schema", _initial_schema),
     ("002_character_gold", _character_gold),
@@ -300,4 +374,5 @@ MIGRATIONS: list[Migration] = [
     ("010_character_background_url", _character_background_url),
     ("011_character_note_tabs", _character_note_tabs),
     ("012_roles_and_character_ownership", _roles_and_character_ownership),
+    ("013_hearthstomancer_decks", _hearthstomancer_decks),
 ]

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Table, Text, Column, UniqueConstraint
+from sqlalchemy import Boolean, JSON, DateTime, ForeignKey, Integer, String, Table, Text, Column, UniqueConstraint
 from .db import Base
 
 from sqlalchemy import text
@@ -50,6 +50,11 @@ class Character(Base):
         order_by=lambda: (CharacterNote.sort_order, CharacterNote.id),
     )
     owner: Mapped["User | None"] = relationship(back_populates="characters")
+    deck: Mapped["CharacterDeck | None"] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class CharacterNote(Base):
@@ -147,3 +152,71 @@ class RefreshToken(Base):
         nullable=True,
     )
     user: Mapped[User] = relationship(back_populates="refresh_tokens")
+
+
+class CharacterDeck(Base):
+    __tablename__ = "character_decks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    undo_copy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    character: Mapped[Character] = relationship(back_populates="deck")
+    definitions: Mapped[list["DeckCardDefinition"]] = relationship(
+        back_populates="deck",
+        cascade="all, delete-orphan",
+    )
+
+
+class DeckCardDefinition(Base):
+    __tablename__ = "deck_card_definitions"
+    __table_args__ = (
+        UniqueConstraint("deck_id", "fingerprint", name="uq_deck_card_definition_fingerprint"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    deck_id: Mapped[int] = mapped_column(ForeignKey("character_decks.id", ondelete="CASCADE"), index=True)
+    source_card_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    cost: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attack: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    health: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    durability: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effect_text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    card_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    rarity: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    card_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tribe: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    spell_school: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    card_set: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    illustration_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deck: Mapped[CharacterDeck] = relationship(back_populates="definitions")
+    copies: Mapped[list["DeckCardCopy"]] = relationship(
+        back_populates="definition",
+        cascade="all, delete-orphan",
+    )
+
+
+class DeckCardCopy(Base):
+    __tablename__ = "deck_card_copies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    definition_id: Mapped[int] = mapped_column(
+        ForeignKey("deck_card_definitions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    is_golden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    zone: Mapped[str] = mapped_column(String(20), nullable=False, default="deck", server_default="deck", index=True)
+    shuffle_key: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    definition: Mapped[DeckCardDefinition] = relationship(back_populates="copies")
