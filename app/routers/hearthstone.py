@@ -37,7 +37,11 @@ from app.schemas.hearthstone import (
     DeckUnconfiguredResponse,
 )
 
-router = APIRouter(responses={422: {"model": ApiError | RequestValidationErrorResponse}})
+# Keep this label stable: Python 3.11 and 3.13 use different HTTPStatus phrases.
+router = APIRouter(responses={422: {
+    "model": ApiError | RequestValidationErrorResponse,
+    "description": "Unprocessable Content",
+}})
 
 
 def can_manage_deck(character: Character, current_user: User) -> bool:
