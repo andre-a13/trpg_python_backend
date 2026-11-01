@@ -1,4 +1,7 @@
 from datetime import datetime
+import json
+from pathlib import Path
+import unicodedata
 from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -361,6 +364,47 @@ async def _hearthstomancer_decks(conn: AsyncConnection) -> None:
     )
 
 
+async def _invengineer_inventions(conn: AsyncConnection) -> None:
+    await _add_column_if_missing(
+        conn,
+        "characters",
+        "invengineer_enabled",
+        "ALTER TABLE characters ADD COLUMN invengineer_enabled BOOLEAN NOT NULL DEFAULT 0",
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS inventions (
+            id INTEGER NOT NULL PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            name_key VARCHAR(200) NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            is_active BOOLEAN NOT NULL DEFAULT 1
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS character_inventions (
+            character_id INTEGER NOT NULL,
+            invention_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (character_id, invention_id),
+            CONSTRAINT uq_character_inventions_position UNIQUE (character_id, position),
+            FOREIGN KEY(character_id) REFERENCES characters (id) ON DELETE CASCADE,
+            FOREIGN KEY(invention_id) REFERENCES inventions (id)
+        )
+        """
+    )
+    # This migration runs once: later catalogue deletions must stay deleted.
+    source = json.loads((Path(__file__).parent / "data" / "inventions.json").read_text(encoding="utf-8"))
+    for item in source["inventions"]:
+        name = unicodedata.normalize("NFC", item["name"].strip())
+        await conn.exec_driver_sql(
+            "INSERT OR IGNORE INTO inventions (name, name_key, description) VALUES (?, ?, ?)",
+            (name, name.casefold(), item["description"]),
+        )
+
+
 MIGRATIONS: list[Migration] = [
     ("001_initial_schema", _initial_schema),
     ("002_character_gold", _character_gold),
@@ -375,4 +419,5 @@ MIGRATIONS: list[Migration] = [
     ("011_character_note_tabs", _character_note_tabs),
     ("012_roles_and_character_ownership", _roles_and_character_ownership),
     ("013_hearthstomancer_decks", _hearthstomancer_decks),
+    ("014_invengineer_inventions", _invengineer_inventions),
 ]

@@ -2,10 +2,9 @@ import hashlib
 import json
 import secrets
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, HttpUrl, StringConstraints
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,56 +21,23 @@ from app.hearthstone_catalog import (
 )
 from app.models import Character, CharacterDeck, DeckCardCopy, DeckCardDefinition, User
 from app.routers.characters import get_character_or_404, require_character_visible
+from app.schemas.errors import ApiError, RequestValidationErrorResponse
 
 
-router = APIRouter()
-CardName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-CardText = Annotated[str, StringConstraints(max_length=10000)]
-CardMetadata = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
-NonNegative = Annotated[int, Field(ge=0)]
+from app.schemas.hearthstone import (
+    HearthstomancerUpdate,
+    DeckDefinitionInput,
+    DeckCompositionUpdate,
+    DeckRemoveRequest,
+    DeckPackOpenRequest,
+    DeckPackSaveRequest,
+    HearthstoneCatalogResponse,
+    HearthstonePackResponse,
+    DeckStateResponse,
+    DeckUnconfiguredResponse,
+)
 
-
-class HearthstomancerUpdate(BaseModel):
-    enabled: bool
-
-
-class DeckDefinitionInput(BaseModel):
-    sourceCardId: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-    name: CardName | None = None
-    cost: NonNegative | None = None
-    attack: NonNegative | None = None
-    health: NonNegative | None = None
-    durability: NonNegative | None = None
-    text: CardText | None = None
-    cardType: CardMetadata | None = None
-    rarity: CardMetadata | None = None
-    cardClass: CardMetadata | None = None
-    tribe: CardMetadata | None = None
-    spellSchool: CardMetadata | None = None
-    cardSet: CardMetadata | None = None
-    illustrationUrl: HttpUrl | None = None
-    normalCount: NonNegative = 0
-    goldenCount: NonNegative = 0
-
-
-class DeckCompositionUpdate(BaseModel):
-    definitions: list[DeckDefinitionInput] = Field(default_factory=list)
-
-
-class DeckRemoveRequest(BaseModel):
-    zone: Literal["deck"]
-    definitionId: int
-    isGolden: bool
-
-
-class DeckPackOpenRequest(BaseModel):
-    cardSet: CardMetadata
-
-
-class DeckPackSaveRequest(BaseModel):
-    sourceCardIds: list[
-        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-    ] = Field(min_length=5, max_length=5)
+router = APIRouter(responses={422: {"model": ApiError | RequestValidationErrorResponse}})
 
 
 def can_manage_deck(character: Character, current_user: User) -> bool:
@@ -308,7 +274,7 @@ async def commit_and_serialize(
     return serialize_deck(character, refreshed, current_user)
 
 
-@router.get("/hearthstone/cards")
+@router.get("/hearthstone/cards", operation_id="hearthstoneCardsList", response_model=HearthstoneCatalogResponse)
 async def list_hearthstone_cards(
     q: str = "",
     cardSet: Annotated[str | None, Query(max_length=120)] = None,
@@ -326,7 +292,7 @@ async def list_hearthstone_cards(
     }
 
 
-@router.patch("/characters/{slug}/hearthstomancer")
+@router.patch("/characters/{slug}/hearthstomancer", operation_id="decksSetEnabled", response_model=DeckStateResponse | DeckUnconfiguredResponse)
 async def set_hearthstomancer_status(
     slug: str,
     body: HearthstomancerUpdate,
@@ -348,7 +314,7 @@ async def set_hearthstomancer_status(
     return serialize_deck(character, refreshed, current_admin)
 
 
-@router.get("/characters/{slug}/deck")
+@router.get("/characters/{slug}/deck", operation_id="decksGet", response_model=DeckStateResponse)
 async def get_character_deck(
     slug: str,
     current_user: User = Depends(require_current_user),
@@ -358,7 +324,7 @@ async def get_character_deck(
     return serialize_deck(character, deck, current_user)
 
 
-@router.post("/characters/{slug}/deck/pack/open")
+@router.post("/characters/{slug}/deck/pack/open", operation_id="decksOpenPack", response_model=HearthstonePackResponse)
 async def open_card_pack(
     slug: str,
     body: DeckPackOpenRequest,
@@ -374,7 +340,7 @@ async def open_card_pack(
     return {"cardSet": body.cardSet, "cards": cards}
 
 
-@router.post("/characters/{slug}/deck/pack/save")
+@router.post("/characters/{slug}/deck/pack/save", operation_id="decksSavePack", response_model=DeckStateResponse)
 async def save_pack_to_deck(
     slug: str,
     body: DeckPackSaveRequest,
@@ -426,7 +392,7 @@ async def save_pack_to_deck(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.put("/characters/{slug}/deck/composition")
+@router.put("/characters/{slug}/deck/composition", operation_id="decksReplaceComposition", response_model=DeckStateResponse)
 async def replace_deck_composition(
     slug: str,
     body: DeckCompositionUpdate,
@@ -476,7 +442,7 @@ async def replace_deck_composition(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.post("/characters/{slug}/deck/draw")
+@router.post("/characters/{slug}/deck/draw", operation_id="decksDraw", response_model=DeckStateResponse)
 async def draw_card(
     slug: str,
     current_user: User = Depends(require_current_user),
@@ -519,7 +485,7 @@ async def get_drawn_copy(copy_id: int, deck_id: int, session: AsyncSession) -> D
     return copy
 
 
-@router.post("/characters/{slug}/deck/copies/{copy_id}/discard")
+@router.post("/characters/{slug}/deck/copies/{copy_id}/discard", operation_id="decksDiscard", response_model=DeckStateResponse)
 async def discard_drawn_card(
     slug: str,
     copy_id: int,
@@ -537,7 +503,7 @@ async def discard_drawn_card(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.post("/characters/{slug}/deck/copies/{copy_id}/play")
+@router.post("/characters/{slug}/deck/copies/{copy_id}/play", operation_id="decksPlay", response_model=DeckStateResponse)
 async def play_drawn_card(
     slug: str,
     copy_id: int,
@@ -559,7 +525,7 @@ async def play_drawn_card(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.post("/characters/{slug}/deck/undo-play")
+@router.post("/characters/{slug}/deck/undo-play", operation_id="decksUndoPlay", response_model=DeckStateResponse)
 async def undo_last_play(
     slug: str,
     current_user: User = Depends(require_current_user),
@@ -582,7 +548,7 @@ async def undo_last_play(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.post("/characters/{slug}/deck/remove")
+@router.post("/characters/{slug}/deck/remove", operation_id="decksRemoveCopy", response_model=DeckStateResponse)
 async def remove_card_copy(
     slug: str,
     body: DeckRemoveRequest,
@@ -616,7 +582,7 @@ async def remove_card_copy(
     return await commit_and_serialize(character, deck, current_user, session)
 
 
-@router.post("/characters/{slug}/deck/reset")
+@router.post("/characters/{slug}/deck/reset", operation_id="decksReset", response_model=DeckStateResponse)
 async def reset_deck(
     slug: str,
     current_user: User = Depends(require_current_user),

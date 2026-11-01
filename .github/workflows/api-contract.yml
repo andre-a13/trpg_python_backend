@@ -1,0 +1,65 @@
+name: API contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m scripts.export_openapi --check
+      - run: python -m unittest discover -v
+
+  sync-frontend:
+    needs: contract
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' && vars.TRPG_CONTRACT_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: trpg-frontend-contract-sync
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: backend
+          persist-credentials: false
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.TRPG_CONTRACT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRPG_CONTRACT_APP_PRIVATE_KEY }}
+          owner: andre-a13
+          repositories: trpg-front-end
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v4
+        with:
+          repository: andre-a13/trpg-front-end
+          ref: master
+          path: frontend
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: python -m scripts.sync_frontend_contract --frontend-dir ../frontend --backend-sha "$GITHUB_SHA"
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}

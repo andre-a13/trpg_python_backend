@@ -1,8 +1,6 @@
 from datetime import datetime
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, StringConstraints, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,39 +19,20 @@ from app.db import get_session
 from app.models import RefreshToken, User
 
 
+from app.schemas.auth import AccountCredentials, UserResponse, TokenPairResponse
+
 router = APIRouter()
 
-Username = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
-Password = Annotated[str, StringConstraints(min_length=12, max_length=1024)]
 
 AUTH_RATE_LIMIT_WINDOW_SECONDS = 300
 AUTH_RATE_LIMIT_MAX_ATTEMPTS = 5
 _auth_attempts: dict[str, list[float]] = {}
 
 
-class AccountCredentials(BaseModel):
-    username: Username
-    password: Password
-
-    @field_validator("username")
-    @classmethod
-    def normalize_username(cls, value: str) -> str:
-        return value.casefold()
 
 
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    role: str
-    created_at: datetime
-    updated_at: datetime
 
 
-class TokenPairResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    refresh_expires_in: int
 
 
 def serialize_user(user: User) -> UserResponse:
@@ -146,7 +125,7 @@ def clear_auth_failures(key: str) -> None:
     _auth_attempts.pop(key, None)
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+@router.post("/register", response_model=UserResponse, status_code=201, operation_id="authRegister")
 async def register(
     body: AccountCredentials,
     request: Request,
@@ -185,7 +164,7 @@ async def register(
     return serialize_user(user)
 
 
-@router.post("/login", response_model=TokenPairResponse)
+@router.post("/login", response_model=TokenPairResponse, operation_id="authLogin")
 async def login(
     body: AccountCredentials,
     request: Request,
@@ -208,7 +187,7 @@ async def login(
     return await issue_token_pair(user, settings, session, response)
 
 
-@router.post("/refresh", response_model=TokenPairResponse)
+@router.post("/refresh", response_model=TokenPairResponse, operation_id="authRefresh")
 async def refresh(
     request: Request,
     response: Response,
@@ -249,7 +228,7 @@ async def refresh(
     )
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, operation_id="authLogout")
 async def logout(
     request: Request,
     response: Response,
@@ -273,6 +252,6 @@ async def logout(
     return None
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserResponse, operation_id="authMe")
 async def me(current_user: User = Depends(require_current_user)):
     return serialize_user(current_user)

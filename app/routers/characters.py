@@ -1,113 +1,35 @@
-from annotated_types import Ge
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, HttpUrl, StringConstraints
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
-from typing import Annotated
 
 from app.auth import is_admin, require_admin_user, require_current_user
 from app.db import get_session
 from app.models import Character, CharacterNote, InventoryCategory, InventoryContent, User, character_teams
 
+from app.schemas.characters import (
+    CharacterCreate,
+    CharacterUpdate,
+    InventoryCategoryCreate,
+    InventoryCategoryUpdate,
+    InventoryContentCreate,
+    InventoryContentUpdate,
+    CharacterNoteCreate,
+    CharacterNoteUpdate,
+    ReorderRequest,
+    CharacterNoteResponse,
+    InventoryContentResponse,
+    InventoryCategoryResponse,
+    CharacterCreatedResponse,
+    CharacterSummaryResponse,
+    CharacterDetailResponse,
+)
+
 router = APIRouter()
 
 DEFAULT_NOTE_TITLE = "Notes"
-SkillName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
-InventoryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-InventoryNotes = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)]
-NoteTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-Score = Annotated[int, Field(ge=0, le=100)]
-
-
-class SkillSet(BaseModel):
-    corps: Score
-    mental: Score
-    social: Score
-
-
-class CharacterCreate(BaseModel):
-    name: Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
-    race: Annotated[str, StringConstraints(min_length=1, max_length=50, strip_whitespace=True)]
-    slug: Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True, to_lower=True)]
-    portraitUrl: HttpUrl | None = None
-    backgroundUrl: HttpUrl | None = None
-    stats: SkillSet
-    skillsPrimary: list[SkillName] = []
-    skillsSecondary: list[SkillName] = []
-    inventory: list[SkillName] = []
-    gold: Annotated[int, Ge(0)] = 0
-    notes: str | None = None
-    current_hp: Annotated[int, Ge(0)] = 0
-    bonusHealth: Annotated[int, Ge(0)] = 0
-    ownerUserId: int | None = None
-
-
-class SkillSetPartial(BaseModel):
-    corps: Score | None = None
-    mental: Score | None = None
-    social: Score | None = None
-
-
-class CharacterUpdate(BaseModel):
-    slug: Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True, to_lower=True, pattern=r"^[a-z0-9-]+$")] | None = None
-    name: Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)] | None = None
-    race: Annotated[str, StringConstraints(min_length=1, max_length=50, strip_whitespace=True)] | None = None
-    portraitUrl: HttpUrl | None = None
-    backgroundUrl: HttpUrl | None = None
-    stats: SkillSetPartial | None = None
-    skillsPrimary: list[SkillName] | None = None
-    skillsSecondary: list[SkillName] | None = None
-    inventory: list[SkillName] | None = None
-    gold: Annotated[int, Ge(0)] | None = None
-    notes: str | None = None
-    current_hp: Annotated[int, Ge(0)] | None = None
-    bonusHealth: Annotated[int, Ge(0)] | None = None
-    ownerUserId: int | None = None
-
-
-class InventoryCategoryCreate(BaseModel):
-    name: InventoryName
-
-
-class InventoryCategoryUpdate(BaseModel):
-    name: InventoryName | None = None
-    sortOrder: Annotated[int, Ge(0)] | None = None
-
-
-class InventoryContentCreate(BaseModel):
-    name: InventoryName
-    quantity: Annotated[int, Ge(0)] = 1
-    notes: InventoryNotes | None = None
-
-
-class InventoryContentUpdate(BaseModel):
-    name: InventoryName | None = None
-    quantity: Annotated[int, Ge(0)] | None = None
-    notes: InventoryNotes | None = None
-    sortOrder: Annotated[int, Ge(0)] | None = None
-
-
-class CharacterNoteCreate(BaseModel):
-    title: NoteTitle
-    content: str | None = ""
-
-
-class CharacterNoteUpdate(BaseModel):
-    title: NoteTitle | None = None
-    content: str | None = None
-    sortOrder: Annotated[int, Ge(0)] | None = None
-
-
-class ReorderEntry(BaseModel):
-    id: int
-    sortOrder: Annotated[int, Ge(0)]
-
-
-class ReorderRequest(BaseModel):
-    items: list[ReorderEntry]
 
 
 def sort_note_tabs(notes: list[CharacterNote]) -> list[CharacterNote]:
@@ -177,6 +99,7 @@ def serialize_character(
         "notes": first_note_content(c),
         "current_hp": c.current_hp,
         "bonusHealth": c.bonus_health,
+        "invengineerEnabled": c.invengineer_enabled,
         "hearthstomancer": {
             "configured": c.deck is not None,
             "enabled": bool(c.deck and c.deck.enabled),
@@ -374,7 +297,7 @@ async def next_note_sort_order(character_id: int, session: AsyncSession) -> int:
     return 0 if value is None else value + 1
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, operation_id="charactersCreate", response_model=CharacterCreatedResponse)
 async def create_character(
     body: CharacterCreate,
     _current_admin: User = Depends(require_admin_user),
@@ -417,7 +340,7 @@ async def create_character(
     return {"id": char.id, "name": char.name, "slug": char.slug, "ownerUserId": char.owner_user_id}
 
 
-@router.get("", status_code=200)
+@router.get("", status_code=200, operation_id="charactersList", response_model=list[CharacterSummaryResponse])
 async def list_characters(
     limit: int = 50,
     offset: int = 0,
@@ -459,7 +382,7 @@ async def list_characters(
     return [serialize_character(c) for c in rows]
 
 
-@router.post("/{slug}/inventory-categories", status_code=201)
+@router.post("/{slug}/inventory-categories", status_code=201, operation_id="inventoryCategoriesCreate", response_model=InventoryCategoryResponse)
 async def create_inventory_category(
     slug: str,
     body: InventoryCategoryCreate,
@@ -483,7 +406,7 @@ async def create_inventory_category(
     return serialize_inventory_category(category)
 
 
-@router.patch("/{slug}/inventory-categories/reorder", status_code=200)
+@router.patch("/{slug}/inventory-categories/reorder", status_code=200, operation_id="inventoryCategoriesReorder", response_model=list[InventoryCategoryResponse])
 async def reorder_inventory_categories(
     slug: str,
     body: ReorderRequest,
@@ -509,7 +432,7 @@ async def reorder_inventory_categories(
     return [serialize_inventory_category(category) for category in refreshed.inventory_categories]
 
 
-@router.patch("/{slug}/inventory-categories/{category_id}", status_code=200)
+@router.patch("/{slug}/inventory-categories/{category_id}", status_code=200, operation_id="inventoryCategoriesUpdate", response_model=InventoryCategoryResponse)
 async def patch_inventory_category(
     slug: str,
     category_id: int,
@@ -533,7 +456,7 @@ async def patch_inventory_category(
     return serialize_inventory_category(category)
 
 
-@router.delete("/{slug}/inventory-categories/{category_id}", status_code=204)
+@router.delete("/{slug}/inventory-categories/{category_id}", status_code=204, operation_id="inventoryCategoriesDelete")
 async def delete_inventory_category(
     slug: str,
     category_id: int,
@@ -547,7 +470,7 @@ async def delete_inventory_category(
     return None
 
 
-@router.post("/{slug}/inventory-categories/{category_id}/items", status_code=201)
+@router.post("/{slug}/inventory-categories/{category_id}/items", status_code=201, operation_id="inventoryItemsCreate", response_model=InventoryContentResponse)
 async def create_inventory_content(
     slug: str,
     category_id: int,
@@ -570,7 +493,7 @@ async def create_inventory_content(
     return serialize_inventory_content(item)
 
 
-@router.patch("/{slug}/inventory-categories/{category_id}/items/reorder", status_code=200)
+@router.patch("/{slug}/inventory-categories/{category_id}/items/reorder", status_code=200, operation_id="inventoryItemsReorder", response_model=list[InventoryContentResponse])
 async def reorder_inventory_content(
     slug: str,
     category_id: int,
@@ -597,7 +520,7 @@ async def reorder_inventory_content(
     return [serialize_inventory_content(item) for item in category.contents]
 
 
-@router.patch("/{slug}/inventory-categories/{category_id}/items/{item_id}", status_code=200)
+@router.patch("/{slug}/inventory-categories/{category_id}/items/{item_id}", status_code=200, operation_id="inventoryItemsUpdate", response_model=InventoryContentResponse)
 async def patch_inventory_content(
     slug: str,
     category_id: int,
@@ -622,7 +545,7 @@ async def patch_inventory_content(
     return serialize_inventory_content(item)
 
 
-@router.delete("/{slug}/inventory-categories/{category_id}/items/{item_id}", status_code=204)
+@router.delete("/{slug}/inventory-categories/{category_id}/items/{item_id}", status_code=204, operation_id="inventoryItemsDelete")
 async def delete_inventory_content(
     slug: str,
     category_id: int,
@@ -637,7 +560,7 @@ async def delete_inventory_content(
     return None
 
 
-@router.post("/{slug}/notes", status_code=201)
+@router.post("/{slug}/notes", status_code=201, operation_id="characterNotesCreate", response_model=CharacterNoteResponse)
 async def create_character_note(
     slug: str,
     body: CharacterNoteCreate,
@@ -662,7 +585,7 @@ async def create_character_note(
     return serialize_character_note(note)
 
 
-@router.patch("/{slug}/notes/reorder", status_code=200)
+@router.patch("/{slug}/notes/reorder", status_code=200, operation_id="characterNotesReorder", response_model=list[CharacterNoteResponse])
 async def reorder_character_notes(
     slug: str,
     body: ReorderRequest,
@@ -688,7 +611,7 @@ async def reorder_character_notes(
     return [serialize_character_note(note) for note in sort_note_tabs(refreshed.note_tabs)]
 
 
-@router.patch("/{slug}/notes/{note_id}", status_code=200)
+@router.patch("/{slug}/notes/{note_id}", status_code=200, operation_id="characterNotesUpdate", response_model=CharacterNoteResponse)
 async def patch_character_note(
     slug: str,
     note_id: int,
@@ -714,7 +637,7 @@ async def patch_character_note(
     return serialize_character_note(note)
 
 
-@router.delete("/{slug}/notes/{note_id}", status_code=204)
+@router.delete("/{slug}/notes/{note_id}", status_code=204, operation_id="characterNotesDelete")
 async def delete_character_note(
     slug: str,
     note_id: int,
@@ -734,7 +657,7 @@ async def delete_character_note(
     return None
 
 
-@router.get("/{slug}", status_code=200)
+@router.get("/{slug}", status_code=200, operation_id="charactersGet", response_model=CharacterDetailResponse)
 async def get_character_by_slug(
     slug: str,
     current_user: User = Depends(require_current_user),
@@ -745,7 +668,7 @@ async def get_character_by_slug(
     return serialize_character(c, include_inventory_categories=True, include_note_tabs=True)
 
 
-@router.patch("/{slug}", status_code=200)
+@router.patch("/{slug}", status_code=200, operation_id="charactersUpdate", response_model=CharacterSummaryResponse)
 async def patch_character(
     slug: str,
     body: CharacterUpdate,

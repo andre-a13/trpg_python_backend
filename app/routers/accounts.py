@@ -1,47 +1,21 @@
-from datetime import datetime
-from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, StringConstraints, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import USER_ROLE_ADMIN, USER_ROLE_PLAYER, create_password_hash, require_admin_user
+from app.auth import USER_ROLE_ADMIN, create_password_hash, require_admin_user
 from app.db import get_session
 from app.models import Character, User
 
 
+from app.schemas.accounts import (
+    AccountCreate,
+    AccountUpdate,
+    AccountResponse,
+)
+
 router = APIRouter()
-
-Username = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
-Password = Annotated[str, StringConstraints(min_length=12, max_length=1024)]
-UserRole = Literal["admin", "player"]
-
-
-class AccountCreate(BaseModel):
-    username: Username
-    password: Password
-    role: UserRole = USER_ROLE_PLAYER
-
-    @field_validator("username")
-    @classmethod
-    def normalize_username(cls, value: str) -> str:
-        return value.casefold()
-
-
-class AccountUpdate(BaseModel):
-    role: UserRole | None = None
-
-
-class AccountResponse(BaseModel):
-    id: int
-    username: str
-    role: UserRole
-    created_at: datetime
-    updated_at: datetime
-    owned_character_count: int
-
 
 def serialize_account(user: User, owned_character_count: int) -> AccountResponse:
     return AccountResponse(
@@ -66,7 +40,7 @@ async def count_owned_characters(user_id: int, session: AsyncSession) -> int:
     return result.scalar_one()
 
 
-@router.get("", response_model=list[AccountResponse])
+@router.get("", response_model=list[AccountResponse], operation_id="accountsList")
 async def list_accounts(
     _current_admin: User = Depends(require_admin_user),
     session: AsyncSession = Depends(get_session),
@@ -80,7 +54,7 @@ async def list_accounts(
     return [serialize_account(user, owned_count) for user, owned_count in result.all()]
 
 
-@router.post("", response_model=AccountResponse, status_code=201)
+@router.post("", response_model=AccountResponse, status_code=201, operation_id="accountsCreate")
 async def create_account(
     body: AccountCreate,
     _current_admin: User = Depends(require_admin_user),
@@ -106,7 +80,7 @@ async def create_account(
     return serialize_account(user, 0)
 
 
-@router.patch("/{user_id}", response_model=AccountResponse)
+@router.patch("/{user_id}", response_model=AccountResponse, operation_id="accountsUpdate")
 async def update_account(
     user_id: int,
     body: AccountUpdate,

@@ -1,5 +1,6 @@
 import atexit
 import asyncio
+from contextlib import closing
 import os
 import random
 import sqlite3
@@ -21,7 +22,8 @@ os.environ["DB_SNAPSHOT_ON_SHUTDOWN"] = "false"
 os.environ["REFRESH_TOKEN_COOKIE_SECURE"] = "false"
 os.environ["ALLOW_FIRST_USER_REGISTRATION"] = "true"
 
-from app.db import engine  # noqa: E402
+from app.db import engine, SessionLocal  # noqa: E402
+from app.models import Character  # noqa: E402
 from app.main import app  # noqa: E402
 from app.migrations import MIGRATIONS, run_migrations  # noqa: E402
 from app.config import Settings  # noqa: E402
@@ -434,6 +436,154 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
         member = response.json()["characters"][0]
         self.assertEqual(member["race"], "Elf")
         self.assertEqual(member["portraitUrl"], "https://example.com/portrait.jpg")
+
+    async def test_invention_import_runs_once_and_preserves_catalogue_changes(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            db_path = os.path.join(temp_dir, "inventions.db")
+            isolated_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+            try:
+                await run_migrations(isolated_engine)
+                with closing(sqlite3.connect(db_path)) as conn, conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM inventions").fetchone()[0], 100)
+                    self.assertEqual(conn.execute("SELECT name, description FROM inventions WHERE id = 1").fetchone(), ("Rayon mortel", ""))
+                    self.assertEqual(conn.execute("SELECT COUNT(DISTINCT name_key) FROM inventions").fetchone()[0], 100)
+                    columns = {row[1] for row in conn.execute("PRAGMA table_info(characters)")}
+                    self.assertIn("invengineer_enabled", columns)
+                    conn.execute("UPDATE inventions SET is_active = 0 WHERE id = 1")
+                await run_migrations(isolated_engine)
+                with closing(sqlite3.connect(db_path)) as conn, conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM inventions").fetchone()[0], 100)
+                    self.assertEqual(conn.execute("SELECT is_active FROM inventions WHERE id = 1").fetchone()[0], 0)
+            finally:
+                await isolated_engine.dispose()
+
+    async def test_invention_catalogue_requires_admin_and_rejects_duplicates(self):
+        async with self.client() as client:
+            headers = self.auth_headers(await self.login(client))
+            _, player_headers = await self.create_account(client, headers)
+            name = f"Inventor tool {uuid4().hex}"
+            self.assertEqual((await client.get("/inventions")).status_code, 401)
+            self.assertEqual((await client.get("/inventions", headers=player_headers)).status_code, 403)
+            self.assertEqual((await client.post("/inventions", json={"name": name}, headers=player_headers)).status_code, 403)
+            self.assertEqual((await client.post("/inventions", json={"name": "   "}, headers=headers)).status_code, 422)
+            added = await client.post("/inventions", json={"name": name}, headers=headers)
+            self.assertEqual(added.status_code, 201, added.text)
+            invention = added.json()
+            self.assertEqual(invention["description"], "")
+            duplicate = await client.post("/inventions", json={"name": f" {name.upper()} "}, headers=headers)
+            self.assertEqual(duplicate.status_code, 409)
+            route = f"/inventions/{invention['id']}"
+            self.assertEqual((await client.delete(route, headers=player_headers)).status_code, 403)
+            self.assertEqual((await client.delete(route, headers=headers)).status_code, 204)
+            catalogue = await client.get("/inventions", headers=headers)
+            self.assertNotIn(invention["id"], {item["id"] for item in catalogue.json()})
+            restored = await client.post("/inventions", json={"name": name}, headers=headers)
+            self.assertEqual(restored.status_code, 201)
+            self.assertEqual(restored.json()["id"], invention["id"])
+            await client.delete(route, headers=headers)
+
+    async def test_invengineer_draw_replaces_associations_and_preserves_existing_items(self):
+        async with self.client() as client:
+            headers = self.auth_headers(await self.login(client))
+            owner, owner_headers = await self.create_account(client, headers)
+            _, outsider_headers = await self.create_account(client, headers)
+            slug = f"inventor-{uuid4().hex}"
+            created = await client.post("/characters", json={
+                "slug": slug, "name": "Inventor", "race": "Human", "ownerUserId": owner["id"],
+                "stats": {"corps": 50, "mental": 50, "social": 50},
+            }, headers=headers)
+            self.assertEqual(created.status_code, 201, created.text)
+            character_id = created.json()["id"]
+            base = f"/characters/{slug}"
+            self.assertEqual((await client.get(base + "/inventions", headers=owner_headers)).json()["items"], [])
+            self.assertEqual((await client.post(base + "/inventions/draw", headers=owner_headers)).status_code, 403)
+            self.assertEqual((await client.patch(base + "/invengineer", json={"enabled": True}, headers=owner_headers)).status_code, 403)
+            enabled = await client.patch(base + "/invengineer", json={"enabled": True}, headers=headers)
+            self.assertEqual(enabled.status_code, 200, enabled.text)
+            self.assertTrue((await client.get(base, headers=owner_headers)).json()["invengineerEnabled"])
+            self.assertEqual((await client.get(base + "/inventions", headers=outsider_headers)).status_code, 404)
+            self.assertEqual((await client.post(base + "/inventions/draw", headers=outsider_headers)).status_code, 404)
+
+            first = await client.post(base + "/inventions/draw", headers=owner_headers)
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(len(first.json()["items"]), 5)
+            self.assertEqual(len({item["id"] for item in first.json()["items"]}), 5)
+            # Catalogue removals do not remove already assigned inventions.
+            removed = first.json()["items"][0]
+            try:
+                self.assertEqual((await client.delete(f"/inventions/{removed['id']}", headers=headers)).status_code, 204)
+                read = await client.get(base + "/inventions", headers=owner_headers)
+                self.assertEqual(read.json(), first.json())
+                # There is intentionally no server cooldown: only the browser blocks redraws.
+                second = await client.post(base + "/inventions/draw", headers=owner_headers)
+                self.assertEqual(second.status_code, 200, second.text)
+                self.assertNotIn(removed["id"], {item["id"] for item in second.json()["items"]})
+                self.assertEqual((await client.get(base + "/inventions", headers=owner_headers)).json(), second.json())
+                with closing(sqlite3.connect(_db_path)) as conn, conn:
+                    rows = conn.execute("SELECT invention_id FROM character_inventions WHERE character_id = ? ORDER BY position", (character_id,)).fetchall()
+                self.assertEqual([row[0] for row in rows], [item["id"] for item in second.json()["items"]])
+                self.assertEqual(len(rows), 5)
+                await client.patch(base + "/invengineer", json={"enabled": False}, headers=headers)
+                self.assertEqual((await client.post(base + "/inventions/draw", headers=owner_headers)).status_code, 403)
+                retained = (await client.get(base + "/inventions", headers=owner_headers)).json()
+                self.assertFalse(retained["enabled"])
+                self.assertEqual(retained["items"], second.json()["items"])
+                async with SessionLocal() as session:
+                    character = await session.get(Character, character_id)
+                    await session.delete(character)
+                    await session.commit()
+                with closing(sqlite3.connect(_db_path)) as conn, conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM character_inventions WHERE character_id = ?", (character_id,)).fetchone()[0], 0)
+            finally:
+                await client.post("/inventions", json={"name": removed["name"]}, headers=headers)
+
+    async def test_invention_team_read_only_small_catalogue_and_concurrent_replacement(self):
+        async with self.client() as client:
+            headers = self.auth_headers(await self.login(client))
+            owner, owner_headers = await self.create_account(client, headers)
+            teammate, teammate_headers = await self.create_account(client, headers)
+            slug = f"inv-owner-{uuid4().hex}"
+            teammate_slug = f"inv-reader-{uuid4().hex}"
+            team_uuid = str(uuid4())
+            for character_slug, owner_id in ((slug, owner["id"]), (teammate_slug, teammate["id"])):
+                created = await client.post("/characters", json={
+                    "slug": character_slug, "name": character_slug, "race": "Human", "ownerUserId": owner_id,
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                }, headers=headers)
+                self.assertEqual(created.status_code, 201, created.text)
+            await client.post("/teams", json={"uuid": team_uuid, "name": "Inventor Team"}, headers=headers)
+            await client.post(f"/teams/{team_uuid}/characters/{slug}", headers=headers)
+            await client.post(f"/teams/{team_uuid}/characters/{teammate_slug}", headers=headers)
+            base = f"/characters/{slug}"
+            await client.patch(base + "/invengineer", json={"enabled": True}, headers=headers)
+            self.assertFalse((await client.get(base + "/inventions", headers=teammate_headers)).json()["permissions"]["canDraw"])
+            self.assertEqual((await client.post(base + "/inventions/draw", headers=teammate_headers)).status_code, 403)
+            draws = await asyncio.gather(*[
+                client.post(base + "/inventions/draw", headers=owner_headers) for _ in range(2)
+            ])
+            for draw in draws:
+                self.assertEqual(draw.status_code, 200, draw.text)
+                self.assertEqual(len({item["id"] for item in draw.json()["items"]}), 5)
+            state = (await client.get(base + "/inventions", headers=owner_headers)).json()
+            self.assertIn(state["items"], [draw.json()["items"] for draw in draws])
+            # With exactly 5 active entries, all 5 may repeat on a later draw.
+            with closing(sqlite3.connect(_db_path)) as conn, conn:
+                active_ids = [row[0] for row in conn.execute("SELECT id FROM inventions WHERE is_active = 1")]
+                conn.execute("UPDATE inventions SET is_active = 0")
+                conn.executemany("UPDATE inventions SET is_active = 1 WHERE id = ?", [(item["id"],) for item in state["items"]])
+            try:
+                repeat = await client.post(base + "/inventions/draw", headers=owner_headers)
+                self.assertEqual(repeat.status_code, 200, repeat.text)
+                self.assertEqual({item["id"] for item in state["items"]}, {item["id"] for item in repeat.json()["items"]})
+                with closing(sqlite3.connect(_db_path)) as conn, conn:
+                    conn.execute("UPDATE inventions SET is_active = 0 WHERE id = ?", (state["items"][0]["id"],))
+                rejected = await client.post(base + "/inventions/draw", headers=owner_headers)
+                self.assertEqual(rejected.status_code, 409)
+                self.assertEqual((await client.get(base + "/inventions", headers=owner_headers)).json(), repeat.json())
+            finally:
+                with closing(sqlite3.connect(_db_path)) as conn, conn:
+                    conn.execute("UPDATE inventions SET is_active = 0")
+                    conn.executemany("UPDATE inventions SET is_active = 1 WHERE id = ?", [(item_id,) for item_id in active_ids])
 
     async def test_migration_bootstrap_created_current_schema(self):
         with sqlite3.connect(_db_path) as conn:

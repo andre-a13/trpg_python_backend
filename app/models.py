@@ -35,6 +35,7 @@ class Character(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_hp: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     bonus_health: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    invengineer_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
     teams: Mapped[list["Team"]] = relationship(
         secondary=character_teams,
         back_populates="characters",
@@ -55,6 +56,32 @@ class Character(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    inventions: Mapped[list["CharacterInvention"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by="CharacterInvention.position",
+    )
+
+
+class Invention(Base):
+    __tablename__ = "inventions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    name_key: Mapped[str] = mapped_column(String(200), unique=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
+
+
+class CharacterInvention(Base):
+    __tablename__ = "character_inventions"
+    __table_args__ = (
+        UniqueConstraint("character_id", "position", name="uq_character_inventions_position"),
+    )
+
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), primary_key=True)
+    invention_id: Mapped[int] = mapped_column(ForeignKey("inventions.id"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer)
+    invention: Mapped[Invention] = relationship()
 
 
 class CharacterNote(Base):

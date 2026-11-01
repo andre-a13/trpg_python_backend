@@ -1,0 +1,405 @@
+{
+  "sourceUrl": "https://docs.google.com/spreadsheets/d/1MqQ96JhKl6pPg1NikSj97rpPw5YUK-HKO2PeHoScVQk/edit",
+  "inventions": [
+    {
+      "name": "Rayon mortel",
+      "description": ""
+    },
+    {
+      "name": "Agrandisseur de monde",
+      "description": ""
+    },
+    {
+      "name": "Lance-Filet Matique",
+      "description": ""
+    },
+    {
+      "name": "Tourelle à boue",
+      "description": ""
+    },
+    {
+      "name": "Boule dansante",
+      "description": ""
+    },
+    {
+      "name": "Super-Moral 3000",
+      "description": ""
+    },
+    {
+      "name": "Le totem de malédiction robotique",
+      "description": ""
+    },
+    {
+      "name": "Guêpe espion",
+      "description": ""
+    },
+    {
+      "name": "Robo démon",
+      "description": ""
+    },
+    {
+      "name": "Poulet de combat",
+      "description": ""
+    },
+    {
+      "name": "H.U.M.4.1.N",
+      "description": ""
+    },
+    {
+      "name": "Téléportail de poche",
+      "description": ""
+    },
+    {
+      "name": "Chaussures à rétro-fusée",
+      "description": ""
+    },
+    {
+      "name": "Baveur acide 9000",
+      "description": ""
+    },
+    {
+      "name": "Lunette de futur véritable",
+      "description": ""
+    },
+    {
+      "name": "Gant magnétiseur d’armes",
+      "description": ""
+    },
+    {
+      "name": "Champ-bulle de sécurité portable",
+      "description": ""
+    },
+    {
+      "name": "Bombarde à éclats temporels",
+      "description": ""
+    },
+    {
+      "name": "Harnais de lévitation instable",
+      "description": ""
+    },
+    {
+      "name": "Module de recyclage instantané",
+      "description": ""
+    },
+    {
+      "name": "Drone-piège « Racl’Bottes »",
+      "description": ""
+    },
+    {
+      "name": "Balai gyroscopique autonome",
+      "description": ""
+    },
+    {
+      "name": "Ancre à gravité inversée",
+      "description": ""
+    },
+    {
+      "name": "Déphaseur de matière sélectif",
+      "description": ""
+    },
+    {
+      "name": "Projecteur d’hologrammes trompeurs",
+      "description": ""
+    },
+    {
+      "name": "Purificateur d’air alchimique",
+      "description": ""
+    },
+    {
+      "name": "Cage de stase portative",
+      "description": ""
+    },
+    {
+      "name": "Chrono-clé à rembobinage local",
+      "description": ""
+    },
+    {
+      "name": "Miroir d’inversion cinétique",
+      "description": ""
+    },
+    {
+      "name": "Radiateur du froid absolu",
+      "description": ""
+    },
+    {
+      "name": "Boîte à ressort dimensionnelle",
+      "description": ""
+    },
+    {
+      "name": "Sonde « Cherche-Veines »",
+      "description": ""
+    },
+    {
+      "name": "Casque à analyse omni-spectrale",
+      "description": ""
+    },
+    {
+      "name": "Émetteur de réseau cogito-mécanique",
+      "description": ""
+    },
+    {
+      "name": "Générateur de ponts modulaires",
+      "description": ""
+    },
+    {
+      "name": "Outil à captation sonore",
+      "description": ""
+    },
+    {
+      "name": "Totem de vue intensive",
+      "description": ""
+    },
+    {
+      "name": "Générateur à fiante spéctaculaire",
+      "description": ""
+    },
+    {
+      "name": "L'outil à exploration divine",
+      "description": ""
+    },
+    {
+      "name": "Le générateur de chaos irrésistible",
+      "description": ""
+    },
+    {
+      "name": "Ours à propulsion arcanique",
+      "description": ""
+    },
+    {
+      "name": "Le mini bateau à réacteur",
+      "description": ""
+    },
+    {
+      "name": "La goutière inversée",
+      "description": ""
+    },
+    {
+      "name": "L'échelle téléscopique",
+      "description": ""
+    },
+    {
+      "name": "Détonateur mental",
+      "description": ""
+    },
+    {
+      "name": "Le disperseur de jus",
+      "description": ""
+    },
+    {
+      "name": "L'assiette boomerang",
+      "description": ""
+    },
+    {
+      "name": "Créateur de ménagerie",
+      "description": ""
+    },
+    {
+      "name": "Le tableau à vision éloignée",
+      "description": ""
+    },
+    {
+      "name": "La feuille pliante à multiple dimensions",
+      "description": ""
+    },
+    {
+      "name": "Amplificateur de panique portatif",
+      "description": ""
+    },
+    {
+      "name": "Canon à écureuils furieux",
+      "description": ""
+    },
+    {
+      "name": "Disjoncteur de gravité localisé",
+      "description": ""
+    },
+    {
+      "name": "Sac sans fond croquant",
+      "description": ""
+    },
+    {
+      "name": "Détecteur de mensonges explosif",
+      "description": ""
+    },
+    {
+      "name": "Clé universelle ?",
+      "description": ""
+    },
+    {
+      "name": "Module d’auto-réparation douteuse",
+      "description": ""
+    },
+    {
+      "name": "Mine saute-humeur",
+      "description": ""
+    },
+    {
+      "name": "Injecteur de courage synthétique",
+      "description": ""
+    },
+    {
+      "name": "Chapeau à invisibilité intermittente",
+      "description": ""
+    },
+    {
+      "name": "Projecteur de clones",
+      "description": ""
+    },
+    {
+      "name": "Ventilateur à dispersion de spores mutagènes",
+      "description": ""
+    },
+    {
+      "name": "Lance-poulies tactique",
+      "description": ""
+    },
+    {
+      "name": "Bottes d’adhérence murale aléatoire",
+      "description": ""
+    },
+    {
+      "name": "Générateur de brouillard bavard",
+      "description": ""
+    },
+    {
+      "name": "Dispositif de duplication",
+      "description": ""
+    },
+    {
+      "name": "Relais de pensée interférée",
+      "description": ""
+    },
+    {
+      "name": "Balise d’invocation incontrôlée",
+      "description": ""
+    },
+    {
+      "name": "Harpon à rappel violent",
+      "description": ""
+    },
+    {
+      "name": "Cube de stockage compressé instable",
+      "description": ""
+    },
+    {
+      "name": "Gants de manipulation télékinétique capricieuse",
+      "description": ""
+    },
+    {
+      "name": "Grenade de permutation d’âme (temporaire ?)",
+      "description": ""
+    },
+    {
+      "name": "Émetteur de bruit héroïque",
+      "description": ""
+    },
+    {
+      "name": "Capsule de repli d’urgence dimensionnelle",
+      "description": ""
+    },
+    {
+      "name": "Oeil mécanique sarcastique",
+      "description": ""
+    },
+    {
+      "name": "Canon à mousse paralysante",
+      "description": ""
+    },
+    {
+      "name": "Lanceur de disques rebondissants intelligents",
+      "description": ""
+    },
+    {
+      "name": "Appareil photo qui capture… autre chose",
+      "description": ""
+    },
+    {
+      "name": "Cloche à perturbation magique",
+      "description": ""
+    },
+    {
+      "name": "Drone livreur suicidaire",
+      "description": ""
+    },
+    {
+      "name": "Batterie d’énergie infinie (presque)",
+      "description": ""
+    },
+    {
+      "name": "Déstabilisateur d’équilibre interne",
+      "description": ""
+    },
+    {
+      "name": "Manteau de furtivité bruyante",
+      "description": ""
+    },
+    {
+      "name": "Machine à générer des excuses crédibles",
+      "description": ""
+    },
+    {
+      "name": "Injecteur de croissance incontrôlée",
+      "description": ""
+    },
+    {
+      "name": "Radar à présence douteuse",
+      "description": ""
+    },
+    {
+      "name": "Lanceur de gel retardant explosif",
+      "description": ""
+    },
+    {
+      "name": "Sifflet d’appel de créatures erronées",
+      "description": ""
+    },
+    {
+      "name": "Gilet pare-balles… à usage unique",
+      "description": ""
+    },
+    {
+      "name": "Module de traduction",
+      "description": ""
+    },
+    {
+      "name": "Horloge à accélération subjective",
+      "description": ""
+    },
+    {
+      "name": "Machine à inverser les boutons (gauche/droite)",
+      "description": ""
+    },
+    {
+      "name": "Projecteur de souvenirs modifiés",
+      "description": ""
+    },
+    {
+      "name": "Lance-flammes froid",
+      "description": ""
+    },
+    {
+      "name": "Générateur de terrain collant",
+      "description": ""
+    },
+    {
+      "name": "Kit de construction instantanée (résultat variable)",
+      "description": ""
+    },
+    {
+      "name": "Brouilleur de sortilèges instable",
+      "description": ""
+    },
+    {
+      "name": "Mini forge portative surchauffée",
+      "description": ""
+    },
+    {
+      "name": "Parapluie anti-météores (non garanti)",
+      "description": ""
+    },
+    {
+      "name": "Sphère de confinement émotionnel",
+      "description": ""
+    }
+  ]
+}
