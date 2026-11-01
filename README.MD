@@ -133,6 +133,51 @@ DB_SNAPSHOT_PREFIX=save
 Docker Compose gives the API a `60s` stop grace period so the upload can finish
 when you run `docker compose down` or `docker compose stop api`.
 
+## API contract
+
+Pydantic request/response schemas define the frontend API contract. Export after
+changing a route or schema, and commit the result alongside the backend change:
+
+```bash
+python -m scripts.export_openapi
+python -m scripts.export_openapi --check
+python -m unittest discover -v
+```
+
+The exporter does not enter FastAPI lifespan, run migrations, connect to the
+configured database, or upload snapshots. It writes deterministic UTF-8 JSON to
+`contracts/openapi.json`. CI runs the check and tests under Python 3.11 on Linux.
+
+### Enable automatic frontend contract PRs
+
+Publish the frontend generator, import script and CI before enabling this backend
+job. Then publish the backend contract and workflow. No production deployment is
+part of this workflow.
+
+1. Register a private GitHub App for the `andre-a13` account. Install it only on
+   `trpg-front-end` with repository Contents and Pull requests permissions set to
+   read/write. Webhooks are unnecessary.
+2. In backend repository Settings > Secrets and variables > Actions, add the App
+   client ID as variable `TRPG_CONTRACT_APP_CLIENT_ID`, and its complete PEM
+   private key as secret `TRPG_CONTRACT_APP_PRIVATE_KEY`.
+3. After the frontend workflow is available, set backend repository variable
+   `TRPG_CONTRACT_SYNC_ENABLED` to `true`.
+4. Run the backend `API contract` workflow on `master`, or push a backend change.
+   Manual trigger: `gh workflow run api-contract.yml --repo andre-a13/trpg_python_backend --ref master`.
+
+The sync job creates a PR branch per contract SHA-256. Restoring a schema whose
+previous PR was already merged creates a new branch qualified by the backend
+revision. Repeated runs preserve existing PRs, including manual adaptations and
+intentionally closed PRs. Old
+backend runs are skipped. A failure after branch push can resume PR creation.
+Only the contract, provenance and generated files are staged. Frontend checks
+must pass before human review and merge; the bot does not merge PRs.
+
+The first synchronization also replaces a local working-tree provenance record
+with the verified producer commit, even if the schema bytes are unchanged.
+Failures of generation or GitHub commands fail the sync job and remain visible
+in Actions; configuration is disabled by default until the variable is enabled.
+
 ## VPS gateway
 
 The public Caddy container lives in `../vps-gateway-project`.

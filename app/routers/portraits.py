@@ -31,7 +31,7 @@ async def get_writable_character_or_404(slug: str, current_user: User, session: 
     return character
 
 
-@router.post("/{slug}/portrait-upload", response_model=CharacterPortraitUploadResponse)
+@router.post("/{slug}/portrait-upload", response_model=CharacterPortraitUploadResponse, operation_id="charactersCreatePortraitUpload")
 async def create_character_portrait_upload(
     slug: str,
     body: CharacterPortraitUploadRequest,
@@ -59,7 +59,7 @@ async def create_character_portrait_upload(
     )
 
 
-@router.post("/{slug}/background-upload", response_model=CharacterBackgroundUploadResponse)
+@router.post("/{slug}/background-upload", response_model=CharacterBackgroundUploadResponse, operation_id="charactersCreateBackgroundUpload")
 async def create_character_background_upload(
     slug: str,
     body: CharacterBackgroundUploadRequest,

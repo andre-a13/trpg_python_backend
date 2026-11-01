@@ -1,8 +1,6 @@
-from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, HttpUrl, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,25 +20,14 @@ from app.storage.scaleway import (
     get_object_storage,
 )
 
+from app.schemas.teams import (
+    TeamCreate,
+    TeamUpdate,
+    TeamIllustrationUpdate,
+    TeamResponse,
+)
+
 router = APIRouter()
-
-
-TeamName = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
-
-
-class TeamCreate(BaseModel):
-    uuid: UUID | None = None
-    name: TeamName
-    illustrationUrl: HttpUrl | None = None
-
-
-class TeamUpdate(BaseModel):
-    name: TeamName | None = None
-    illustrationUrl: HttpUrl | None = None
-
-
-class TeamIllustrationUpdate(BaseModel):
-    illustrationUrl: HttpUrl | None = None
 
 
 def serialize_team(team: Team):
@@ -110,7 +97,7 @@ async def require_team_visible(team: Team, current_user: User, session: AsyncSes
         raise HTTPException(status_code=404, detail="Team not found")
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, operation_id="teamsCreate", response_model=TeamResponse)
 async def create_team(
     body: TeamCreate,
     _current_admin: User = Depends(require_admin_user),
@@ -133,7 +120,7 @@ async def create_team(
     return serialize_team(team)
 
 
-@router.get("", status_code=200)
+@router.get("", status_code=200, operation_id="teamsList", response_model=list[TeamResponse])
 async def list_teams(
     limit: int = 50,
     offset: int = 0,
@@ -157,7 +144,7 @@ async def list_teams(
     return [serialize_team(team) for team in rows]
 
 
-@router.get("/{team_uuid}", status_code=200)
+@router.get("/{team_uuid}", status_code=200, operation_id="teamsGet", response_model=TeamResponse)
 async def get_team(
     team_uuid: UUID,
     current_user: User = Depends(require_current_user),
@@ -168,7 +155,7 @@ async def get_team(
     return serialize_team(team)
 
 
-@router.post("/{team_uuid}/illustration-upload", response_model=TeamIllustrationUploadResponse)
+@router.post("/{team_uuid}/illustration-upload", response_model=TeamIllustrationUploadResponse, operation_id="teamsCreateIllustrationUpload")
 async def create_team_illustration_upload(
     team_uuid: UUID,
     body: TeamIllustrationUploadRequest,
@@ -197,7 +184,7 @@ async def create_team_illustration_upload(
     )
 
 
-@router.patch("/{team_uuid}/illustration", status_code=200)
+@router.patch("/{team_uuid}/illustration", status_code=200, operation_id="teamsUpdateIllustration", response_model=TeamResponse)
 async def patch_team_illustration(
     team_uuid: UUID,
     body: TeamIllustrationUpdate,
@@ -212,7 +199,7 @@ async def patch_team_illustration(
     return serialize_team(team)
 
 
-@router.patch("/{team_uuid}", status_code=200)
+@router.patch("/{team_uuid}", status_code=200, operation_id="teamsUpdate", response_model=TeamResponse)
 async def patch_team(
     team_uuid: UUID,
     body: TeamUpdate,
@@ -231,7 +218,7 @@ async def patch_team(
     return serialize_team(team)
 
 
-@router.post("/{team_uuid}/characters/{character_slug}", status_code=200)
+@router.post("/{team_uuid}/characters/{character_slug}", status_code=200, operation_id="teamsAddMember", response_model=TeamResponse)
 async def add_character_to_team(
     team_uuid: UUID,
     character_slug: str,
@@ -246,7 +233,7 @@ async def add_character_to_team(
     return serialize_team(team)
 
 
-@router.delete("/{team_uuid}/characters/{character_slug}", status_code=200)
+@router.delete("/{team_uuid}/characters/{character_slug}", status_code=200, operation_id="teamsRemoveMember", response_model=TeamResponse)
 async def remove_character_from_team(
     team_uuid: UUID,
     character_slug: str,

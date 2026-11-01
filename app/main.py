@@ -5,9 +5,10 @@ from fastapi import FastAPI
 from .db import engine
 from .db_snapshot import create_and_upload_database_snapshot
 from .migrations import run_migrations
-from .routers import accounts, auth, characters, hearthstone, portraits, teams
+from .routers import accounts, auth, characters, hearthstone, inventions, portraits, teams
 from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
+from .schemas.system import HealthResponse, RootResponse
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ app.include_router(characters.router, prefix="/characters", tags=["characters"])
 app.include_router(portraits.router, prefix="/characters", tags=["character portraits"])
 app.include_router(teams.router, prefix="/teams", tags=["teams"])
 app.include_router(hearthstone.router, tags=["hearthstone decks"])
+app.include_router(inventions.router, tags=["inventions"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -42,11 +44,11 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning"],
 )
 
-@app.get("/")
+@app.get("/", operation_id="systemRoot", response_model=RootResponse)
 def read_root():
     return {"Hello": "World"}
 
-@app.get("/health")
+@app.get("/health", operation_id="systemHealth", response_model=HealthResponse)
 def health():
     return {"ok": True}
 
