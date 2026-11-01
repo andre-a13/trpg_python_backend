@@ -1,6 +1,4 @@
-from contextlib import closing
 import logging
-import sqlite3
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,14 +6,11 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 
 from app.config import Settings
+from app.sqlite_backup import DatabaseSnapshotError, create_sqlite_snapshot
 from app.storage.scaleway import ScalewayObjectStorage
 
 
 logger = logging.getLogger(__name__)
-
-
-class DatabaseSnapshotError(RuntimeError):
-    pass
 
 
 def create_and_upload_database_snapshot(settings: Settings) -> str | None:
@@ -30,7 +25,7 @@ def create_and_upload_database_snapshot(settings: Settings) -> str | None:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         snapshot_path = Path(temp_dir) / filename
-        _create_sqlite_snapshot(db_path, snapshot_path)
+        create_sqlite_snapshot(db_path, snapshot_path)
 
         storage = ScalewayObjectStorage(settings)
         storage.upload_file(
@@ -53,14 +48,6 @@ def _sqlite_database_path(database_url: str) -> Path:
     if not db_path.exists():
         raise DatabaseSnapshotError(f"SQLite database does not exist: {db_path}")
     return db_path
-
-
-def _create_sqlite_snapshot(source_path: Path, snapshot_path: Path) -> None:
-    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with closing(sqlite3.connect(source_path, timeout=30)) as source:
-        with closing(sqlite3.connect(snapshot_path)) as snapshot:
-            source.backup(snapshot)
 
 
 def _object_key(prefix: str, filename: str) -> str:

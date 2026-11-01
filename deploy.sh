@@ -15,17 +15,31 @@ fi
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
+echo "==> Validating backend Docker Compose config"
+docker compose config >/dev/null
+
+api_container="$(docker compose ps -q api || true)"
+api_running=false
+if [ -n "${api_container}" ] && [ "$(docker inspect -f '{{.State.Running}}' "${api_container}")" = "true" ]; then
+    api_running=true
+fi
+
 echo "==> Creating local SQLite backup"
-mkdir -p data/backups
 if [ -f "data/data.db" ]; then
-    cp data/data.db "data/backups/data-${timestamp}.db"
+    # Stream the new backup tool: the running image may predate this release.
+    if [ "${api_running}" = "true" ]; then
+        docker compose exec -T api python - /app/data/data.db \
+            "/app/data/backups/data-${timestamp}.db" < app/sqlite_backup.py
+    else
+        docker compose run --rm --no-deps -T --entrypoint python api - /app/data/data.db \
+            "/app/data/backups/data-${timestamp}.db" < app/sqlite_backup.py
+    fi
     echo "Saved local backup: data/backups/data-${timestamp}.db"
 else
     echo "No data/data.db found; skipping local backup."
 fi
 
-api_container="$(docker compose ps -q api || true)"
-if [ -n "${api_container}" ] && [ "$(docker inspect -f '{{.State.Running}}' "${api_container}")" = "true" ]; then
+if [ "${api_running}" = "true" ]; then
     echo "==> Uploading pre-deploy SQLite snapshot to S3"
     docker compose exec -T api python - <<'PY'
 from app.config import get_settings
@@ -40,9 +54,6 @@ PY
 else
     echo "No running api container found; skipping pre-deploy S3 snapshot."
 fi
-
-echo "==> Validating backend Docker Compose config"
-docker compose config >/dev/null
 
 echo "==> Deploying backend"
 docker compose up -d --build
