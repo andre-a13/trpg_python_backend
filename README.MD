@@ -133,6 +133,43 @@ DB_SNAPSHOT_PREFIX=save
 Docker Compose gives the API a `60s` stop grace period so the upload can finish
 when you run `docker compose down` or `docker compose stop api`.
 
+## Pre-deployment SQLite backup and migration rehearsal
+
+`deploy.sh` first validates Compose and creates a consistent SQLite backup in
+`data/backups/` using SQLite's online backup API, including committed WAL data.
+The backup is checked with `PRAGMA quick_check`. A failed backup stops
+deployment; an existing backup is never overwritten. On a first deployment
+without `data/data.db`, the backup is skipped. The standalone tool refuses a
+missing source rather than creating an empty database.
+
+The standard-library-only tool `app/sqlite_backup.py` is streamed into the
+running API's Python process, so it works before the updated image is deployed.
+If the API is stopped, Compose runs a one-off Python container without starting
+FastAPI or running migrations. S3 shutdown snapshots reuse the same backup
+function. The existing pre-deployment S3 upload remains in place.
+
+For an independent backup with the backend Python environment:
+
+```bash
+python -m app.sqlite_backup data/data.db data/backups/manual-before-release.db
+```
+
+Before production, rehearse on an up-to-date database snapshot:
+
+```bash
+python -m scripts.check_database_migrations \
+  --source data/data.db --output-dir data/rehearsals/release-check
+```
+
+The output directory must be new. The command backs up the source and migrates
+only its copy. It checks preservation of pre-existing rows, database integrity,
+foreign keys, an unchanged second migration pass, and schema equivalence with a
+fresh database (columns, foreign keys, indexes). `report.json` contains versions
+and row counts, without campaign content or account credentials. Unexpected
+data or schema changes fail the rehearsal and require inspection of the copy.
+It does not start the API or upload to S3. This rehearsal does not migrate the
+live database; the current application still runs migrations at startup.
+
 ## API contract
 
 Pydantic request/response schemas define the frontend API contract. Export after
