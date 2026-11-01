@@ -1,6 +1,8 @@
 """Export the API schema without entering lifespan or opening a database."""
 
 import argparse
+from difflib import unified_diff
+from itertools import islice
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,10 @@ def main() -> int:
     if args.check:
         if not args.output.exists() or args.output.read_bytes() != expected:
             print(f"OpenAPI contract is stale. Run python -m scripts.export_openapi: {args.output}")
+            current = args.output.read_text(encoding="utf-8") if args.output.exists() else ""
+            difference = unified_diff(current.splitlines(), expected.decode("utf-8").splitlines(),
+                                      fromfile="versioned", tofile="exported", lineterm="")
+            print("\n".join(islice(difference, 100)))
             return 1
         print(f"OpenAPI contract is up to date: {args.output}")
         return 0

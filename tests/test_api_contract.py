@@ -102,6 +102,8 @@ class ApiContractTests(unittest.TestCase):
                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(check.returncode, 1)
+            self.assertIn("--- versioned", check.stdout)
+            self.assertIn("+++ exported", check.stdout)
 
 
 if __name__ == "__main__":
