@@ -34,8 +34,8 @@ RARE_OR_BETTER = ("RARE", "EPIC", "LEGENDARY")
 
 # HearthstoneJSON exposes stable enum codes in the `set` field. Keep the raw
 # code for filtering and persistence, while exposing a readable French
-# expansion name to the client. The two technical groups at the end are part
-# of the supplied snapshot and must remain searchable.
+# expansion name to the client. Keep technical and historical codes readable
+# as well; only groups present in the supplied snapshot are listed.
 CARD_SET_NAMES_FR = {
     "VANILLA": "Classique (version originale)",
     "CORE": "Ensemble fondamental",
@@ -75,6 +75,17 @@ CARD_SET_NAMES_FR = {
     "TITANS": "TITANS",
     "WILD_WEST": "Rixe en terres Ingrates",
     "WONDERS": "Cavernes du Temps",
+    "WHIZBANGS_WORKSHOP": "L’Atelier de Mystifix",
+    "ISLAND_VACATION": "Paradis en péril",
+    "SPACE": "La Ténèbre de l’Au-delà",
+    "EMERALD_DREAM": "Au cœur du Rêve d’émeraude",
+    "THE_LOST_CITY": "La cité perdue d’Un’Goro",
+    "TIME_TRAVEL": "Par-delà les voies temporelles",
+    "CATACLYSM": "CATACLYSME",
+    "ESCAPEFROM_VIOLET_HOLD": "Évasion du fort Pourpre",
+    "BE": "Le règne de l’Empire noir",
+    "EVENT": "Évènements",
+    "CORE_HIDDEN": "Ensemble fondamental masqué (technique)",
     "PLACEHOLDER_202204": "Ensemble fondamental 2022 (technique)",
     UNASSIGNED_SET_CODE: "Ensemble fondamental sans code de set",
 }

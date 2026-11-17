@@ -1510,6 +1510,292 @@
         "title": "DeckDefinitionResponse",
         "type": "object"
       },
+      "DeckImportCommitRequest": {
+        "properties": {
+          "expectedRevision": {
+            "minimum": 0.0,
+            "title": "Expectedrevision",
+            "type": "integer"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/DeckImportSelection"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "selections"
+        ],
+        "title": "DeckImportCommitRequest",
+        "type": "object"
+      },
+      "DeckImportFileRequest": {
+        "properties": {
+          "contentBase64": {
+            "maxLength": 2796204,
+            "minLength": 1,
+            "title": "Contentbase64",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "contentBase64"
+        ],
+        "title": "DeckImportFileRequest",
+        "type": "object"
+      },
+      "DeckImportPreviewResponse": {
+        "properties": {
+          "goldenCount": {
+            "title": "Goldencount",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DeckImportPreviewRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "totalCount": {
+            "title": "Totalcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "rows",
+          "totalCount",
+          "goldenCount"
+        ],
+        "title": "DeckImportPreviewResponse",
+        "type": "object"
+      },
+      "DeckImportPreviewRow": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/HearthstoneCardResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "rawName": {
+            "title": "Rawname",
+            "type": "string"
+          },
+          "rawValues": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rawvalues",
+            "type": "array"
+          },
+          "rowNumber": {
+            "title": "Rownumber",
+            "type": "integer"
+          },
+          "selectedCardId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectedcardid"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeckImportSourceRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "matched",
+              "suggested",
+              "missing",
+              "invalid"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowNumber",
+          "source",
+          "rawName",
+          "rawValues",
+          "status",
+          "candidates",
+          "selectedCardId"
+        ],
+        "title": "DeckImportPreviewRow",
+        "type": "object"
+      },
+      "DeckImportSelection": {
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/DeckImportSourceRow"
+          },
+          "sourceCardId": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Sourcecardid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "sourceCardId"
+        ],
+        "title": "DeckImportSelection",
+        "type": "object"
+      },
+      "DeckImportSourceRow": {
+        "properties": {
+          "attack": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attack"
+          },
+          "cardType": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardtype"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "illustrationUrl": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illustrationurl"
+          },
+          "isGolden": {
+            "default": false,
+            "title": "Isgolden",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "rowNumber": {
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Rownumber",
+            "type": "integer"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "rowNumber",
+          "name"
+        ],
+        "title": "DeckImportSourceRow",
+        "type": "object"
+      },
       "DeckPackOpenRequest": {
         "properties": {
           "cardSet": {
@@ -2425,8 +2711,16 @@
       },
       "TeamCharacterResponse": {
         "properties": {
+          "current_hp": {
+            "title": "Current Hp",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
+            "type": "integer"
+          },
+          "max_hp": {
+            "title": "Max Hp",
             "type": "integer"
           },
           "name": {
@@ -2470,7 +2764,9 @@
           "name",
           "race",
           "portraitUrl",
-          "ownerUserId"
+          "ownerUserId",
+          "current_hp",
+          "max_hp"
         ],
         "title": "TeamCharacterResponse",
         "type": "object"
@@ -3669,6 +3965,136 @@
           }
         ],
         "summary": "Draw Card",
+        "tags": [
+          "hearthstone decks"
+        ]
+      }
+    },
+    "/characters/{slug}/deck/import": {
+      "post": {
+        "operationId": "decksCommitImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeckImportCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeckStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Deckscommitimport"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Commit Deck Import",
+        "tags": [
+          "hearthstone decks"
+        ]
+      }
+    },
+    "/characters/{slug}/deck/import/preview": {
+      "post": {
+        "operationId": "decksPreviewImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeckImportFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeckImportPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Deckspreviewimport"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Deck Import",
         "tags": [
           "hearthstone decks"
         ]

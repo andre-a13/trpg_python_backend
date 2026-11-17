@@ -64,6 +64,23 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(detail["inventoryCategories"], [])
         self.assertEqual(CharacterDetailResponse.model_validate(detail).model_dump(), detail)
 
+    def test_team_summaries_expose_health_without_full_character_details(self):
+        from types import SimpleNamespace
+        from app.routers.teams import serialize_team
+        from app.schemas.teams import TeamResponse
+
+        for corps, bonus, expected_max in ((0, 0, 5), (52, 3, 18), (53, 3, 19), (100, 5, 30)):
+            with self.subTest(corps=corps, bonus=bonus):
+                character = SimpleNamespace(
+                    id=1, slug="hero", name="Hero", race="Human", portrait_url=None,
+                    owner_user_id=2, current_hp=0, stats={"corps": corps}, bonus_health=bonus,
+                )
+                body = serialize_team(SimpleNamespace(uuid="team", name="Team", illustration_url=None, characters=[character]))
+                self.assertEqual(TeamResponse.model_validate(body).model_dump(), body)
+                self.assertEqual(body["characters"][0]["current_hp"], 0)
+                self.assertEqual(body["characters"][0]["max_hp"], expected_max)
+                self.assertNotIn("notes", body["characters"][0])
+
     def test_deck_configuration_variants_keep_their_original_shapes(self):
         from types import SimpleNamespace
         from pydantic import TypeAdapter

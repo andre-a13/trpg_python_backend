@@ -27,6 +27,8 @@ class TeamCharacterResponse(BaseModel):
     race: str
     portraitUrl: str | None
     ownerUserId: int | None
+    current_hp: int
+    max_hp: int
 
 
 class TeamResponse(BaseModel):

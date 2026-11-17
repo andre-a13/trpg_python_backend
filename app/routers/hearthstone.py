@@ -1,3 +1,5 @@
+import base64
+import binascii
 import hashlib
 import json
 import secrets
@@ -22,6 +24,8 @@ from app.hearthstone_catalog import (
 from app.models import Character, CharacterDeck, DeckCardCopy, DeckCardDefinition, User
 from app.routers.characters import get_character_or_404, require_character_visible
 from app.schemas.errors import ApiError, RequestValidationErrorResponse
+from app.deck_import import definition_from_import, preview_rows
+from app.deck_import_file import read_deck_file
 
 
 from app.schemas.hearthstone import (
@@ -35,6 +39,9 @@ from app.schemas.hearthstone import (
     HearthstonePackResponse,
     DeckStateResponse,
     DeckUnconfiguredResponse,
+    DeckImportFileRequest,
+    DeckImportPreviewResponse,
+    DeckImportCommitRequest,
 )
 
 # Keep this label stable: Python 3.11 and 3.13 use different HTTPStatus phrases.
@@ -443,6 +450,65 @@ async def replace_deck_composition(
                 for _ in range(count)
             ])
 
+    return await commit_and_serialize(character, deck, current_user, session)
+
+
+@router.post("/characters/{slug}/deck/import/preview", operation_id="decksPreviewImport", response_model=DeckImportPreviewResponse)
+async def preview_deck_import(
+    slug: str,
+    body: DeckImportFileRequest,
+    current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character, deck = await deck_context(slug, current_user, session)
+    require_deck_manager(character, current_user)
+    require_active_deck(deck)
+    try:
+        content = base64.b64decode(body.contentBase64, validate=True)
+        preview = preview_rows(read_deck_file(body.filename, content))
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"revision": deck.revision, **preview}
+
+
+@router.post("/characters/{slug}/deck/import", operation_id="decksCommitImport", response_model=DeckStateResponse)
+async def commit_deck_import(
+    slug: str,
+    body: DeckImportCommitRequest,
+    current_user: User = Depends(require_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character, deck = await deck_context(slug, current_user, session)
+    require_deck_manager(character, current_user)
+    require_active_deck(deck)
+    if deck.revision != body.expectedRevision:
+        raise HTTPException(status_code=409, detail="Deck changed since preview; preview again")
+    if len({item.source.rowNumber for item in body.selections}) != len(body.selections):
+        raise HTTPException(status_code=422, detail="Duplicate imported row")
+    if sum(item.source.quantity for item in body.selections) > 500:
+        raise HTTPException(status_code=422, detail="A deck import is limited to 500 copies")
+    # Validate every link before any mutation. Missing/custom cards are never fabricated.
+    grouped: dict[str, dict] = {}
+    for item in body.selections:
+        payload = definition_from_import(item.source, item.sourceCardId)
+        values = definition_values(payload)
+        fingerprint = definition_fingerprint(values)
+        group = grouped.setdefault(fingerprint, {"values": values, "normal": 0, "golden": 0})
+        group["normal"] += payload.normalCount
+        group["golden"] += payload.goldenCount
+    await claim_revision(deck, session)
+    await finalize_undo(deck, session)
+    for fingerprint, group in grouped.items():
+        definition = next((d for d in deck.definitions if d.fingerprint == fingerprint), None)
+        if definition is None:
+            definition = DeckCardDefinition(deck_id=deck.id, fingerprint=fingerprint, **group["values"])
+            session.add(definition)
+            await session.flush()
+        for is_golden, count in ((False, group["normal"]), (True, group["golden"])):
+            session.add_all([
+                DeckCardCopy(definition_id=definition.id, is_golden=is_golden, zone="deck", shuffle_key=next_shuffle_key())
+                for _ in range(count)
+            ])
     return await commit_and_serialize(character, deck, current_user, session)
 
 

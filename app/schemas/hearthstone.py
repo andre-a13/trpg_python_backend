@@ -135,3 +135,49 @@ class DeckStateResponse(BaseModel):
 class DeckUnconfiguredResponse(BaseModel):
     configured: Literal[False]
     enabled: Literal[False]
+
+
+class DeckImportFileRequest(BaseModel):
+    filename: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    contentBase64: Annotated[str, StringConstraints(min_length=1, max_length=2796204)]
+
+
+class DeckImportSourceRow(BaseModel):
+    rowNumber: Annotated[int, Field(ge=1, le=1000)]
+    name: CardName
+    quantity: Annotated[int, Field(ge=1, le=500)] = 1
+    isGolden: bool = False
+    cardType: CardMetadata | None = None
+    cost: Annotated[int, Field(ge=0, le=10000)] | None = None
+    attack: Annotated[int, Field(ge=0, le=10000)] | None = None
+    health: Annotated[int, Field(ge=0, le=10000)] | None = None
+    text: CardText | None = None
+    illustrationUrl: HttpUrl | None = None
+
+
+class DeckImportPreviewRow(BaseModel):
+    rowNumber: int
+    source: DeckImportSourceRow | None
+    rawName: str
+    rawValues: list[str]
+    status: Literal["matched", "suggested", "missing", "invalid"]
+    candidates: list[HearthstoneCardResponse]
+    selectedCardId: str | None
+    error: str | None = None
+
+
+class DeckImportPreviewResponse(BaseModel):
+    revision: int
+    rows: list[DeckImportPreviewRow]
+    totalCount: int
+    goldenCount: int
+
+
+class DeckImportSelection(BaseModel):
+    source: DeckImportSourceRow
+    sourceCardId: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class DeckImportCommitRequest(BaseModel):
+    expectedRevision: NonNegative
+    selections: list[DeckImportSelection] = Field(min_length=1, max_length=500)
