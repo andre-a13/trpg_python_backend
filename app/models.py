@@ -60,6 +60,8 @@ class Character(Base):
         cascade="all, delete-orphan",
         order_by="CharacterInvention.position",
     )
+    light_book: Mapped["LightBook | None"] = relationship(cascade="all, delete-orphan", uselist=False)
+    light_words: Mapped[list["CharacterLightWord"]] = relationship(cascade="all, delete-orphan")
 
 
 class Invention(Base):
@@ -82,6 +84,29 @@ class CharacterInvention(Base):
     invention_id: Mapped[int] = mapped_column(ForeignKey("inventions.id"), primary_key=True)
     position: Mapped[int] = mapped_column(Integer)
     invention: Mapped[Invention] = relationship()
+
+
+class LightBook(Base):
+    __tablename__ = "light_books"
+
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), primary_key=True)
+    slot_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class LightWord(Base):
+    __tablename__ = "light_words"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    name_key: Mapped[str] = mapped_column(String(400), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CharacterLightWord(Base):
+    __tablename__ = "character_light_words"
+
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("light_words.id"), primary_key=True)
 
 
 class CharacterNote(Base):

@@ -405,6 +405,36 @@ async def _invengineer_inventions(conn: AsyncConnection) -> None:
         )
 
 
+async def _light_books(conn: AsyncConnection) -> None:
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS light_books (
+            character_id INTEGER NOT NULL PRIMARY KEY REFERENCES characters (id) ON DELETE CASCADE,
+            slot_count INTEGER NOT NULL
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS light_words (
+            id INTEGER NOT NULL PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            name_key VARCHAR(400) NOT NULL UNIQUE,
+            description TEXT NOT NULL
+        )
+        """
+    )
+    await conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS character_light_words (
+            character_id INTEGER NOT NULL REFERENCES characters (id) ON DELETE CASCADE,
+            word_id INTEGER NOT NULL REFERENCES light_words (id),
+            PRIMARY KEY (character_id, word_id)
+        )
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     ("001_initial_schema", _initial_schema),
     ("002_character_gold", _character_gold),
@@ -420,4 +450,5 @@ MIGRATIONS: list[Migration] = [
     ("012_roles_and_character_ownership", _roles_and_character_ownership),
     ("013_hearthstomancer_decks", _hearthstomancer_decks),
     ("014_invengineer_inventions", _invengineer_inventions),
+    ("015_light_books", _light_books),
 ]

@@ -516,6 +516,79 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.json()["id"], invention["id"])
             await client.delete(route, headers=headers)
 
+    async def test_light_catalogue_is_masked_and_discoveries_are_private(self):
+        async with self.client() as client:
+            admin = self.auth_headers(await self.login(client))
+            owner, player = await self.create_account(client, admin)
+            teammate, viewer = await self.create_account(client, admin)
+            _, outsider = await self.create_account(client, admin)
+            suffix = uuid4().hex
+            slug = f"practitioner-{suffix}"
+            teammate_slug = f"witness-{suffix}"
+            for character_slug, user_id in ((slug, owner["id"]), (teammate_slug, teammate["id"])):
+                created = await client.post("/characters", headers=admin, json={
+                    "slug": character_slug, "name": character_slug, "race": "Human", "ownerUserId": user_id,
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                })
+                self.assertEqual(created.status_code, 201, created.text)
+                if character_slug == slug:
+                    character_id = created.json()["id"]
+            team_uuid = str(uuid4())
+            await client.post("/teams", headers=admin, json={"uuid": team_uuid, "name": "Light Book test"})
+            for character_slug in (slug, teammate_slug):
+                await client.post(f"/teams/{team_uuid}/characters/{character_slug}", headers=admin)
+
+            book = f"/characters/{slug}/light-book"
+            settings = f"{book}/settings"
+            catalogue = "/light/words"
+            initial = await client.get(book, headers=player)
+            self.assertEqual(initial.json(), {"slotCount": 0, "words": []})
+            self.assertEqual((await client.get(book, headers=outsider)).status_code, 404)
+            self.assertEqual((await client.get(catalogue)).status_code, 401)
+            self.assertEqual((await client.post(catalogue, headers=player, json={"name": "Other"})).status_code, 403)
+            before = (await client.get(catalogue, headers=player)).json()
+            self.assertTrue(all(word is None for word in before))
+            self.assertEqual((await client.put(settings, headers=player, json={"slotCount": 3})).status_code, 403)
+            self.assertEqual((await client.put(settings, headers=admin, json={"slotCount": True})).status_code, 422)
+            self.assertEqual((await client.put(settings, headers=admin, json={"slotCount": 3})).json(), {"slotCount": 3})
+            dashboard = await client.get("/light/books/settings", headers=admin)
+            self.assertEqual(dashboard.json()[str(character_id)], {"slotCount": 3})
+
+            ids = []
+            for name in (f"Aurore-{suffix}", f"Garde-{suffix}"):
+                create = await client.post(catalogue, headers=admin, json={"name": f" {name} ", "description": "Private meaning"})
+                self.assertEqual(create.status_code, 201, create.text)
+                self.assertEqual(create.json()["name"], name)
+                self.assertEqual(create.json()["description"], "Private meaning")
+                word_id = create.json()["id"]
+                ids.append(word_id)
+                grant = f"{book}/words/{word_id}"
+                self.assertEqual((await client.put(grant, headers=player)).status_code, 403)
+                self.assertEqual((await client.put(grant, headers=admin)).status_code, 204)
+                self.assertEqual((await client.put(grant, headers=admin)).status_code, 204)
+
+            full = (await client.get(catalogue, headers=admin)).json()
+            self.assertEqual(len(full), len(before) + 2)
+            self.assertTrue(set(ids).issubset(word["id"] for word in full))
+            masked = await client.get(catalogue, headers=player)
+            self.assertEqual(masked.json(), [word if word["id"] in ids else None for word in full])
+            self.assertEqual(masked.headers["cache-control"], "private, no-store")
+            hidden = await client.get(catalogue, headers=viewer)
+            self.assertEqual(hidden.json(), [None] * len(full))
+            private = (await client.get(book, headers=viewer)).json()
+            self.assertEqual(private, {"slotCount": None, "words": []})
+            other_book = (await client.get(f"/characters/{teammate_slug}/light-book", headers=viewer)).json()
+            self.assertEqual(other_book, {"slotCount": 0, "words": []})
+            self.assertEqual((await client.put(f"{book}/incantation", headers=player, json={"wordIds": ids})).status_code, 404)
+            owned = (await client.get(book, headers=player)).json()
+            self.assertEqual(owned["slotCount"], 3)
+            self.assertEqual({word["id"] for word in owned["words"]}, set(ids))
+            self.assertEqual((await client.get(book, headers=admin)).json(), owned)
+            await client.put(settings, headers=admin, json={"slotCount": 0})
+            final = (await client.get(book, headers=player)).json()
+            self.assertEqual(final["slotCount"], 0)
+            self.assertEqual({word["id"] for word in final["words"]}, set(ids))
+
     async def test_invengineer_draw_replaces_associations_and_preserves_existing_items(self):
         async with self.client() as client:
             headers = self.auth_headers(await self.login(client))
