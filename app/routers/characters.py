@@ -133,13 +133,12 @@ async def get_character_or_404(
     slug: str,
     session: AsyncSession,
     include_inventory_categories: bool = False,
+    *,
+    include_sheet_details: bool = True,
 ) -> Character:
-    options = [
-        selectinload(Character.teams),
-        selectinload(Character.note_tabs),
-        selectinload(Character.owner),
-        selectinload(Character.deck),
-    ]
+    options = [selectinload(Character.teams)]
+    if include_sheet_details:
+        options += [selectinload(Character.note_tabs), selectinload(Character.owner), selectinload(Character.deck)]
     if include_inventory_categories:
         options.append(selectinload(Character.inventory_categories).selectinload(InventoryCategory.contents))
 

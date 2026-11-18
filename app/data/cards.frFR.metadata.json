@@ -1,0 +1,10 @@
+{
+  "source": "https://api.hearthstonejson.com/v1/latest/frFR/cards.json",
+  "locale": "frFR",
+  "verifiedAt": "2026-11-07",
+  "lastModified": "Tue, 03 Nov 2026 17:22:54 GMT",
+  "sha256": "7268dec7b7e45fccfde087ec615ca9f0dabaeeaebbde9eac16c2f763f2bbcdc3",
+  "rawCards": 36390,
+  "collectibleCards": 8328,
+  "collectibleSets": 49
+}

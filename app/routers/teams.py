@@ -43,6 +43,8 @@ def serialize_team(team: Team):
                 "race": character.race,
                 "portraitUrl": character.portrait_url,
                 "ownerUserId": character.owner_user_id,
+                "current_hp": character.current_hp,
+                "max_hp": round(character.stats["corps"] / 5 + 5) + character.bonus_health,
             }
             for character in team.characters
         ],

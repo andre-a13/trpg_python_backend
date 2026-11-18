@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from .db import engine
 from .db_snapshot import create_and_upload_database_snapshot
 from .migrations import run_migrations
-from .routers import accounts, auth, characters, hearthstone, inventions, portraits, teams
+from .routers import accounts, auth, characters, hearthstone, inventions, light, portraits, teams
 from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .schemas.system import HealthResponse, RootResponse
@@ -36,6 +36,7 @@ app.include_router(portraits.router, prefix="/characters", tags=["character port
 app.include_router(teams.router, prefix="/teams", tags=["teams"])
 app.include_router(hearthstone.router, tags=["hearthstone decks"])
 app.include_router(inventions.router, tags=["inventions"])
+app.include_router(light.router, tags=["light magic"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

@@ -409,6 +409,40 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owned_upload.status_code, 200)
         self.assertEqual(teammate_upload.status_code, 403)
 
+    async def test_team_health_updates_preserve_character_permissions(self):
+        async with self.client() as client:
+            headers = self.auth_headers(await self.login(client))
+            owner, owner_headers = await self.create_account(client, headers)
+            other, other_headers = await self.create_account(client, headers)
+            team_uuid = str(uuid4())
+            owned_slug = f"hp-owned-{uuid4().hex}"
+            teammate_slug = f"hp-teammate-{uuid4().hex}"
+            for slug, owner_id in ((owned_slug, owner["id"]), (teammate_slug, other["id"])):
+                created = await client.post("/characters", headers=headers, json={
+                    "slug": slug, "name": slug, "race": "Human", "ownerUserId": owner_id,
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                    "current_hp": 12, "bonusHealth": 3,
+                })
+                self.assertEqual(created.status_code, 201, created.text)
+            await client.post("/teams", headers=headers, json={"uuid": team_uuid, "name": "HP Team"})
+            for slug in (owned_slug, teammate_slug):
+                await client.post(f"/teams/{team_uuid}/characters/{slug}", headers=headers)
+
+            initial = await client.get(f"/teams/{team_uuid}", headers=owner_headers)
+            self.assertEqual(initial.status_code, 200, initial.text)
+            self.assertTrue(all(row["current_hp"] == 12 and row["max_hp"] == 18 for row in initial.json()["characters"]))
+            changed = await client.patch(f"/characters/{owned_slug}", headers=owner_headers, json={"current_hp": 7})
+            self.assertEqual(changed.status_code, 200, changed.text)
+            forbidden = await client.patch(f"/characters/{teammate_slug}", headers=owner_headers, json={"current_hp": 0})
+            self.assertEqual(forbidden.status_code, 403)
+            admin_change = await client.patch(f"/characters/{teammate_slug}", headers=headers, json={"current_hp": 0})
+            self.assertEqual(admin_change.status_code, 200, admin_change.text)
+            updated = await client.get(f"/teams/{team_uuid}", headers=other_headers)
+            rows = {row["slug"]: row for row in updated.json()["characters"]}
+            self.assertEqual(rows[owned_slug]["current_hp"], 7)
+            self.assertEqual(rows[teammate_slug]["current_hp"], 0)
+            self.assertEqual(rows[teammate_slug]["max_hp"], 18)
+
     async def test_team_character_summaries_include_roster_fields(self):
         async with self.client() as client:
             access_token = await self.login(client)
@@ -481,6 +515,79 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.status_code, 201)
             self.assertEqual(restored.json()["id"], invention["id"])
             await client.delete(route, headers=headers)
+
+    async def test_light_catalogue_is_masked_and_discoveries_are_private(self):
+        async with self.client() as client:
+            admin = self.auth_headers(await self.login(client))
+            owner, player = await self.create_account(client, admin)
+            teammate, viewer = await self.create_account(client, admin)
+            _, outsider = await self.create_account(client, admin)
+            suffix = uuid4().hex
+            slug = f"practitioner-{suffix}"
+            teammate_slug = f"witness-{suffix}"
+            for character_slug, user_id in ((slug, owner["id"]), (teammate_slug, teammate["id"])):
+                created = await client.post("/characters", headers=admin, json={
+                    "slug": character_slug, "name": character_slug, "race": "Human", "ownerUserId": user_id,
+                    "stats": {"corps": 50, "mental": 50, "social": 50},
+                })
+                self.assertEqual(created.status_code, 201, created.text)
+                if character_slug == slug:
+                    character_id = created.json()["id"]
+            team_uuid = str(uuid4())
+            await client.post("/teams", headers=admin, json={"uuid": team_uuid, "name": "Light Book test"})
+            for character_slug in (slug, teammate_slug):
+                await client.post(f"/teams/{team_uuid}/characters/{character_slug}", headers=admin)
+
+            book = f"/characters/{slug}/light-book"
+            settings = f"{book}/settings"
+            catalogue = "/light/words"
+            initial = await client.get(book, headers=player)
+            self.assertEqual(initial.json(), {"slotCount": 0, "words": []})
+            self.assertEqual((await client.get(book, headers=outsider)).status_code, 404)
+            self.assertEqual((await client.get(catalogue)).status_code, 401)
+            self.assertEqual((await client.post(catalogue, headers=player, json={"name": "Other"})).status_code, 403)
+            before = (await client.get(catalogue, headers=player)).json()
+            self.assertTrue(all(word is None for word in before))
+            self.assertEqual((await client.put(settings, headers=player, json={"slotCount": 3})).status_code, 403)
+            self.assertEqual((await client.put(settings, headers=admin, json={"slotCount": True})).status_code, 422)
+            self.assertEqual((await client.put(settings, headers=admin, json={"slotCount": 3})).json(), {"slotCount": 3})
+            dashboard = await client.get("/light/books/settings", headers=admin)
+            self.assertEqual(dashboard.json()[str(character_id)], {"slotCount": 3})
+
+            ids = []
+            for name in (f"Aurore-{suffix}", f"Garde-{suffix}"):
+                create = await client.post(catalogue, headers=admin, json={"name": f" {name} ", "description": "Private meaning"})
+                self.assertEqual(create.status_code, 201, create.text)
+                self.assertEqual(create.json()["name"], name)
+                self.assertEqual(create.json()["description"], "Private meaning")
+                word_id = create.json()["id"]
+                ids.append(word_id)
+                grant = f"{book}/words/{word_id}"
+                self.assertEqual((await client.put(grant, headers=player)).status_code, 403)
+                self.assertEqual((await client.put(grant, headers=admin)).status_code, 204)
+                self.assertEqual((await client.put(grant, headers=admin)).status_code, 204)
+
+            full = (await client.get(catalogue, headers=admin)).json()
+            self.assertEqual(len(full), len(before) + 2)
+            self.assertTrue(set(ids).issubset(word["id"] for word in full))
+            masked = await client.get(catalogue, headers=player)
+            self.assertEqual(masked.json(), [word if word["id"] in ids else None for word in full])
+            self.assertEqual(masked.headers["cache-control"], "private, no-store")
+            hidden = await client.get(catalogue, headers=viewer)
+            self.assertEqual(hidden.json(), [None] * len(full))
+            private = (await client.get(book, headers=viewer)).json()
+            self.assertEqual(private, {"slotCount": None, "words": []})
+            other_book = (await client.get(f"/characters/{teammate_slug}/light-book", headers=viewer)).json()
+            self.assertEqual(other_book, {"slotCount": 0, "words": []})
+            self.assertEqual((await client.put(f"{book}/incantation", headers=player, json={"wordIds": ids})).status_code, 404)
+            owned = (await client.get(book, headers=player)).json()
+            self.assertEqual(owned["slotCount"], 3)
+            self.assertEqual({word["id"] for word in owned["words"]}, set(ids))
+            self.assertEqual((await client.get(book, headers=admin)).json(), owned)
+            await client.put(settings, headers=admin, json={"slotCount": 0})
+            final = (await client.get(book, headers=player)).json()
+            self.assertEqual(final["slotCount"], 0)
+            self.assertEqual({word["id"] for word in final["words"]}, set(ids))
 
     async def test_invengineer_draw_replaces_associations_and_preserves_existing_items(self):
         async with self.client() as client:
@@ -1101,13 +1208,13 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(catalog_card["cardSet"], "TGT")
             self.assertEqual(catalog_card["cardSetName"], "Le Grand Tournoi")
-            self.assertEqual(len(catalog_body["sets"]), 40)
+            self.assertEqual(len(catalog_body["sets"]), 49)
             self.assertEqual(
                 sum(card_set["cardCount"] for card_set in catalog_body["sets"]),
-                5845,
+                8328,
             )
             self.assertIn(
-                {"code": "__UNASSIGNED__", "name": "Ensemble fondamental sans code de set", "cardCount": 127},
+                {"code": "CATACLYSM", "name": "CATACLYSME", "cardCount": 164},
                 catalog_body["sets"],
             )
             filtered_catalog = await client.get(
@@ -1364,3 +1471,67 @@ class SecurityDataTests(unittest.IsolatedAsyncioTestCase):
         drawn_ids = [card["copyId"] for card in state.json()["drawnCards"]]
         self.assertEqual(len(drawn_ids), len(set(drawn_ids)))
         self.assertEqual(len(drawn_ids), len(successful))
+
+    async def test_deck_import_preview_append_permissions_atomicity_and_revision(self):
+        import base64
+        async with self.client() as client:
+            admin = self.auth_headers(await self.login(client))
+            owner, owner_headers = await self.create_account(client, admin, "player")
+            _, other_headers = await self.create_account(client, admin, "player")
+            slug = f"deck-import-{uuid4().hex}"
+            created = await client.post("/characters", headers=admin, json={
+                "slug": slug, "name": "Import Hero", "race": "Human", "ownerUserId": owner["id"],
+                "stats": {"corps": 50, "mental": 50, "social": 50},
+            })
+            self.assertEqual(created.status_code, 201, created.text)
+            await client.patch(f"/characters/{slug}/hearthstomancer", headers=admin, json={"enabled": True})
+            initial = await client.put(f"/characters/{slug}/deck/composition", headers=owner_headers,
+                                       json={"definitions": [{"sourceCardId": "AT_003", "normalCount": 1}]})
+            drawn = await client.post(f"/characters/{slug}/deck/draw", headers=owner_headers)
+            copy_id = drawn.json()["drawnCards"][0]["copyId"]
+            content = ("Carte (FR);Quantité;Type;Coût;Stats (ATQ/PV);Effet (résumé);Illustration;Dorée\n"
+                       "Boule de feu;2;Sort;1;;Adaptation du joueur;;Oui\n"
+                       "Boule de feu;1;Sort;1;;Adaptation du joueur;;Non\n"
+                       "Givrix;1;Serviteur;3;3/3;Carte custom;;Oui\n").encode()
+            body = {"filename": "deck.csv", "contentBase64": base64.b64encode(content).decode()}
+            path = f"/characters/{slug}/deck/import"
+            denied = await client.post(path + "/preview", json=body, headers=other_headers)
+            self.assertIn(denied.status_code, {403, 404})
+            anonymous = await client.post(path + "/preview", json=body)
+            self.assertEqual(anonymous.status_code, 401)
+            preview = await client.post(path + "/preview", json=body, headers=owner_headers)
+            self.assertEqual(preview.status_code, 200, preview.text)
+            report = preview.json()
+            self.assertEqual((report["totalCount"], report["goldenCount"]), (4, 3))
+            self.assertEqual(report["rows"][2]["status"], "missing")
+            unchanged = await client.get(f"/characters/{slug}/deck", headers=owner_headers)
+            self.assertEqual(unchanged.json(), drawn.json())
+            selections = [{"source": row["source"], "sourceCardId": row["selectedCardId"]}
+                          for row in report["rows"] if row["selectedCardId"]]
+            commit = {"expectedRevision": report["revision"], "selections": selections}
+            bad = {**commit, "selections": [selections[0], {**selections[1], "sourceCardId": "not-real"}]}
+            rejected = await client.post(path, json=bad, headers=owner_headers)
+            self.assertEqual(rejected.status_code, 422, rejected.text)
+            after_rejected = await client.get(f"/characters/{slug}/deck", headers=owner_headers)
+            self.assertEqual(after_rejected.json(), drawn.json())
+            forbidden = await client.post(path, json=commit, headers=other_headers)
+            self.assertIn(forbidden.status_code, {403, 404})
+            saved = await client.post(path, json=commit, headers=owner_headers)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            state = saved.json()
+            self.assertEqual(state["counts"], {"total": 4, "remaining": 3, "drawn": 1})
+            self.assertEqual(state["drawnCards"][0]["copyId"], copy_id)
+            fireball = next(row for row in state["definitions"] if row["sourceCardId"] == "CS2_029")
+            self.assertEqual((fireball["normalCount"], fireball["goldenCount"]), (1, 2))
+            self.assertEqual((fireball["cost"], fireball["text"]), (1, "Adaptation du joueur"))
+            replay = await client.post(path, json=commit, headers=owner_headers)
+            self.assertEqual(replay.status_code, 409, replay.text)
+            next_body = {**commit, "expectedRevision": state["revision"], "selections": [selections[0]]}
+            repeated_card = await client.post(path, json=next_body, headers=admin)
+            self.assertEqual(repeated_card.status_code, 200, repeated_card.text)
+            self.assertEqual(repeated_card.json()["counts"]["total"], 6)
+            await client.patch(f"/characters/{slug}/hearthstomancer", headers=admin, json={"enabled": False})
+            inactive = await client.post(path + "/preview", json=body, headers=owner_headers)
+            self.assertEqual(inactive.status_code, 409)
+            inactive_commit = await client.post(path, json=next_body, headers=owner_headers)
+            self.assertEqual(inactive_commit.status_code, 409)
